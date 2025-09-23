@@ -260,6 +260,7 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     home_stats = stats.get("home", {})
     away_stats = stats.get("away", {})
     status = radar_data.get("status", {})
+    elapsed = status.get("elapsed", 0)   # ✅ corrigido aqui
 
     # ✅ Placar atualizado
     fixture = radar_data.get("fixture", {}) or {}
@@ -379,6 +380,7 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
                     "Sugestão conservadora devido a pouca atividade", 0.40)
 
     return tips
+
 
 # =========================
 # RADAR IA (ao vivo) — funções consolidadas
