@@ -867,23 +867,44 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     away_goals = score.get("away") or 0
     total_goals = home_goals + away_goals
 
-    # normaliza stats (cada API usa chaves diferentes)
+    # =========================
+    # Função para normalizar estatísticas (aceita várias chaves possíveis)
+    # =========================
     def get_stat(side_stats, *keys):
         for k in keys:
             if k in side_stats:
                 return side_stats.get(k) or 0
         return 0
 
+    # 🔫 Remates
     home_shots_total = get_stat(home_stats, 'total_shots', 'shots_total', 'shots')
     away_shots_total = get_stat(away_stats, 'total_shots', 'shots_total', 'shots')
+
+    # 🎯 Remates no Gol
     home_shots_on = get_stat(home_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
     away_shots_on = get_stat(away_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
     total_shots = (home_shots_total or 0) + (away_shots_total or 0)
 
+    # 🥅 Escanteios
     home_corners = get_stat(home_stats, 'corner_kicks', 'corners', 'corner_kicks_full')
     away_corners = get_stat(away_stats, 'corner_kicks', 'corners', 'corner_kicks_full')
     total_corners = (home_corners or 0) + (away_corners or 0)
 
+    # 🟨 Cartões Amarelos
+    home_yellow = get_stat(home_stats, 'yellow_cards', 'yellows', 'cards_yellow')
+    away_yellow = get_stat(away_stats, 'yellow_cards', 'yellows', 'cards_yellow')
+
+    # 🟥 Cartões Vermelhos
+    home_red = get_stat(home_stats, 'red_cards', 'reds', 'cards_red')
+    away_red = get_stat(away_stats, 'red_cards', 'reds', 'cards_red')
+
+    # 🔄 Posse de Bola
+    home_possession = get_stat(home_stats, 'ball_possession', 'possession', 'possession_pct')
+    away_possession = get_stat(away_stats, 'ball_possession', 'possession', 'possession_pct')
+
+    # =========================
+    # Helper para adicionar dicas
+    # =========================
     def add_tip(market, recommendation, reason, confidence):
         tips.append({
             "market": market,
@@ -922,7 +943,7 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
                     total_seconds += 60
         return (total_seconds + 59) // 60
 
-    # só armazena no radar_data, não vira dica de aposta
+    # calcula acréscimo estimado e adiciona no radar_data (não como dica de aposta)
     if 35 <= elapsed < 45:
         radar_data["extra_time_est"] = {
             "half": 1,
@@ -950,18 +971,13 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
         add_tip("Ambas Marcam", "Sim",
                 f"Ambas as equipas rematam ({home_shots_total} vs {away_shots_total})", 0.75)
 
-    # ⚽ Escanteios
     if elapsed > 25:
-        if total_corners >= 7:
-            add_tip("Escanteios Asiáticos", f"Mais de {total_corners + 1.5}",
-                    f"{total_corners} escanteios já cobrados", 0.72)
-        elif total_shots > 10 and total_corners < 5:
-            if home_shots_total > away_shots_total:
-                add_tip("Escanteios (Equipe)", "Próximo escanteio para o Time da Casa",
-                        "Casa pressiona forte mas tem poucos cantos", 0.65)
-            else:
-                add_tip("Escanteios (Equipe)", "Próximo escanteio para o Time Visitante",
-                        "Visitante pressiona forte mas tem poucos cantos", 0.65)
+        if total_corners > 5:
+            add_tip("Escanteios Asiáticos", f"Mais de {total_corners + 2}",
+                    f"{total_corners} escanteios já cobrados", 0.80)
+        elif total_shots > 10 and total_corners < 4:
+            add_tip("Escanteios (Equipe)", "Próximo escanteio para o time mais ofensivo",
+                    "Alta pressão e poucos cantos até agora", 0.60)
 
     # ⚡ Heurística de pressão ofensiva
     if home_shots_total - away_shots_total >= 8 and home_shots_on >= 3:
@@ -994,8 +1010,7 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
                     "Sugestão conservadora devido a pouca atividade", 0.40)
 
     return tips
-
-
+    
 # =========================
 # formatação da análise para exibição
 # =========================
