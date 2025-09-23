@@ -305,7 +305,6 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
             elif "gol" in cat:
                 total_seconds += 60
             elif "var" in cat:
-                # Se tiver timestamps de início/fim, usa; senão assume 60s
                 start = ev.get("start_time")
                 end = ev.get("end_time")
                 if start and end:
@@ -365,7 +364,6 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
                     "Sugestão conservadora devido a pouca atividade", 0.40)
 
     return tips
-
 # =========================
 # RADAR IA (ao vivo) — funções consolidadas
 # =========================
