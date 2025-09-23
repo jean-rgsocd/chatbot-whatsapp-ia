@@ -1022,6 +1022,19 @@ def format_live_analysis(radar_data: Dict, tips: List[Dict]) -> str:
     if extra_est:
         lines.append(f"⏱️ Estimativa de Acréscimo {extra_est['half']}ºT: {extra_est['minutes']} min")
 
+    # 📊 estatísticas principais
+    stats = radar_data.get("statistics", {})
+    home_stats = stats.get("home", {})
+    away_stats = stats.get("away", {})
+
+    lines.append("\n📊 Estatísticas principais:")
+    lines.append(f"Remates: {home_stats.get('total_shots', 0)} x {away_stats.get('total_shots', 0)}")
+    lines.append(f"Remates no Gol: {home_stats.get('shots_on_target', 0)} x {away_stats.get('shots_on_target', 0)}")
+    lines.append(f"Escanteios: {home_stats.get('corner_kicks', 0)} x {away_stats.get('corner_kicks', 0)}")
+    lines.append(f"Cartões Amarelos: {home_stats.get('yellow_cards', 0)} x {away_stats.get('yellow_cards', 0)}")
+    lines.append(f"Cartões Vermelhos: {home_stats.get('red_cards', 0)} x {away_stats.get('red_cards', 0)}")
+    lines.append(f"Posse de Bola: {home_stats.get('ball_possession', 0)}% x {away_stats.get('ball_possession', 0)}%")
+
     lines.append("\n🎯 Dicas de Aposta:")
 
     # organizar por mercados
