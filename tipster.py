@@ -60,11 +60,8 @@ def api_get_raw(path: str, params: dict = None, timeout: int = 25) -> Optional[D
         return None
 
 # =========================
-# SPORTS BETTING ANALYZER (pré-live)
+# Pequenos helpers utilitários
 # =========================
-
-PREFERRED_BOOKMAKERS = ["bet365", "betano", "superbet", "pinnacle"]
-
 def safe_int(v):
     try: return int(v)
     except (ValueError, TypeError):
@@ -76,6 +73,20 @@ def safe_float(v, default: float = 0.0):
         return float(str(v).replace(",", "."))
     except Exception:
         return default
+
+def format_conf_pct(confidence: Optional[float]) -> str:
+    """Formata confiança float (0..1) para percent string (ex.: 0.45 -> '45%')."""
+    try:
+        c = float(confidence or 0.0)
+        return f"{c*100:.0f}%"
+    except Exception:
+        return "0%"
+
+# =========================
+# SPORTS BETTING ANALYZER (pré-live)
+# =========================
+
+PREFERRED_BOOKMAKERS = ["bet365", "betano", "superbet", "pinnacle"]
 
 def normalize_game(raw: dict) -> dict:
     fixture = raw.get("fixture", {}) or {}
@@ -166,31 +177,31 @@ def heuristics_football(fixture_raw: dict, stats_map: Dict[int, Dict[str, Any]])
     def add(market, rec, conf, reason=None): preds.append({"market": market, "recommendation": rec, "confidence": conf, "reason": reason or ""})
     # primary picks
     if power_diff > 4:
-        add("moneyline", "Vitória Casa", 0.8, f"Power diff {round(power_diff,2)}")
+        add("moneyline", "Vitória Casa", 0.8, f"Diferença de força {round(power_diff,2)}")
     elif power_diff < -4:
-        add("moneyline", "Vitória Visitante", 0.8, f"Power diff {round(power_diff,2)}")
+        add("moneyline", "Vitória Visitante", 0.8, f"Diferença de força {round(power_diff,2)}")
     # additional heuristics
     # if many shots but few goals -> suggest Over 1.5
     total_shots = (h_sot or 0) + (a_sot or 0)
     if total_shots > 8:
-        add("Total de Gols", "Mais de 1.5", 0.6, f"{total_shots} chutes detectados")
+        add("Total de Gols", "Mais de 1.5", 0.6, f"{total_shots} remates detectados")
     # both teams attacking
     if (h_sot or 0) > 2 and (a_sot or 0) > 2:
-        add("Ambas Marcam", "Sim", 0.6, f"Shots: {h_sot} vs {a_sot}")
+        add("Ambas Marcam", "Sim", 0.6, f"Remates: {h_sot} vs {a_sot}")
     summary = {"home_power": round(h_power, 2), "away_power": round(a_power, 2)}
 
     # Ensure at least 3 picks — fill with generic conservative picks if needed
     if len(preds) < 3:
         # pick 1: Over 1.5 or Under 2.5 depending on total_shots
         if total_shots >= 6:
-            add("Total de Gols", "Mais de 1.5", 0.45, "Fallback por atividade ofensiva")
+            add("Total de Gols", "Mais de 1.5", 0.45, "Sugestão baseada em atividade ofensiva")
         else:
-            add("Total de Gols", "Menos de 2.5", 0.45, "Fallback por baixa atividade")
+            add("Total de Gols", "Menos de 2.5", 0.45, "Sugestão conservadora por baixa atividade")
         # pick 2: Both Teams to Score conservative
-        add("Ambas Marcam", "Sim", 0.40, "Fallback genérico")
+        add("Ambas Marcam", "Sim", 0.40, "Sugestão conservadora")
     # If still <3, pad with neutral market
     while len(preds) < 3:
-        add("Resultado Final", "Sem favorito definido", 0.30, "Fallback neutro")
+        add("Resultado Final", "Sem favorito definido", 0.30, "Dados limitados para definir favorito")
 
     return preds, summary
 
@@ -256,13 +267,20 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     away_goals = score.get("away", 0)
     total_goals = home_goals + away_goals
 
-    home_shots = home_stats.get('total_shots', 0)
-    away_shots = away_stats.get('total_shots', 0)
-    total_shots = home_shots + away_shots
+    # normalize many possible keys (some APIs use different names)
+    def get_stat(side_stats, *keys):
+        for k in keys:
+            if k in side_stats:
+                return side_stats.get(k) or 0
+        return 0
 
-    home_corners = home_stats.get('corner_kicks', 0)
-    away_corners = away_stats.get('corner_kicks', 0)
-    total_corners = home_corners + away_corners
+    home_shots = get_stat(home_stats, 'total_shots', 'shots_total', 'shots')
+    away_shots = get_stat(away_stats, 'total_shots', 'shots_total', 'shots')
+    total_shots = (home_shots or 0) + (away_shots or 0)
+
+    home_corners = get_stat(home_stats, 'corner_kicks', 'corners', 'corner_kicks_full')
+    away_corners = get_stat(away_stats, 'corner_kicks', 'corners', 'corner_kicks_full')
+    total_corners = (home_corners or 0) + (away_corners or 0)
 
     def add_tip(market, recommendation, reason, confidence):
         tips.append({
@@ -274,31 +292,31 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
 
     if elapsed > 20:
         if total_shots > 7 and total_goals < 2:
-            add_tip("Gols Asiáticos", f"Mais de {total_goals + 0.5}", f"{total_shots} chutes totais", 0.70)
+            add_tip("Gols Asiáticos", f"Mais de {total_goals + 0.5}", f"{total_shots} remates totais", 0.70)
         elif total_shots < 3:
-            add_tip("Gols Asiáticos", f"Menos de {total_goals + 1.5}", f"Apenas {total_shots} chutes", 0.65)
+            add_tip("Gols Asiáticos", f"Menos de {total_goals + 1.5}", f"Apenas {total_shots} remates", 0.65)
 
-    if home_shots > 3 and away_shots > 3 and total_goals < 3:
-        add_tip("Ambas Marcam", "Sim", f"Ambos os times chutando ({home_shots} vs {away_shots})", 0.75)
+    if (home_shots or 0) > 3 and (away_shots or 0) > 3 and total_goals < 3:
+        add_tip("Ambas Marcam", "Sim", f"Ambas as equipas rematam ({home_shots} vs {away_shots})", 0.75)
 
     if elapsed > 25:
         if total_corners > 5:
             add_tip("Escanteios Asiáticos", f"Mais de {total_corners + 2}", f"{total_corners} escanteios já cobrados", 0.80)
         elif total_shots > 10 and total_corners < 4:
-            add_tip("Escanteios (Equipe)", "Próximo escanteio para o time mais ofensivo", "Alta pressão, poucos cantos", 0.60)
+            add_tip("Escanteios (Equipe)", "Próximo escanteio para o time mais ofensivo", "Alta pressão e poucos cantos até agora", 0.60)
 
     if elapsed > 75:
         if total_goals == 0:
-            add_tip("Total de Gols", "Menos de 1.5", "Poucos gols e pouco tempo restante", 0.85)
+            add_tip("Total de Gols", "Menos de 1.5", "Poucos golos e pouco tempo restante", 0.85)
         elif home_goals > away_goals:
-            add_tip("Resultado Final", "Vitória do Time da Casa", "Time da casa segurando o resultado", 0.70)
+            add_tip("Resultado Final", "Vitória do Time da Casa", "Time da casa a segurar o resultado", 0.70)
 
     # fallback: if no tips, provide a conservative suggestion based on elapsed/shots
     if not tips:
         if total_shots >= 6:
-            add_tip("Total de Gols", "Mais de 1.5", "Fallback por atividade", 0.45)
+            add_tip("Total de Gols", "Mais de 1.5", "Sugestão baseada na atividade de remates", 0.45)
         else:
-            add_tip("Total de Gols", "Menos de 2.5", "Fallback conservador", 0.40)
+            add_tip("Total de Gols", "Menos de 2.5", "Sugestão conservadora devido a pouca atividade", 0.40)
 
     return tips
 
@@ -427,7 +445,7 @@ def stats_aovivo(game_id: int):
         return None
 
 # =========================
-# OPTA IA (análise de jogador)
+# OPTA IA (análise de jogador) - expandida
 # =========================
 def get_players_for_team(team_id: int, season: int = datetime.now().year) -> Optional[List[Dict]]:
     if not API_SPORTS_KEY:
@@ -447,18 +465,26 @@ def get_players_for_team(team_id: int, season: int = datetime.now().year) -> Opt
         print(f"ERRO ao buscar jogadores para o time {team_id}: {e}")
         return None
 
+def _sum_stat_if_exists(aggregated, category, key):
+    try:
+        return aggregated.get(category, {}).get(key, 0.0)
+    except Exception:
+        return 0.0
+
 def process_and_analyze_stats(player_data: Dict) -> Dict:
     """
     Processa estatísticas do jogador e gera recomendações.
-    Agora garante pelo menos uma recomendação (fallback) baseada nas médias.
+    Ampliado para capturar remates totais, remates ao golo, assistências, passes, 'rebotes' estimados e gerar recomendações para vários mercados.
+    Garante pelo menos uma recomendação (mensagem clara) em caso de dados limitados.
     """
     stats_list = player_data.get("statistics", []) or []
     aggregated = defaultdict(lambda: defaultdict(float))
     total_games = 0
 
+    # Normaliza e agrega vários campos vindos de diferentes formatos da API
     for entry in stats_list:
         games_block = entry.get("games", {}) or {}
-        # API pode usar 'appearances' ou 'appearences' (typo)
+        # API pode usar 'appearances' ou 'appearences' (typo) ou 'played'
         appearances = safe_int(games_block.get("appearences", 0) or games_block.get("appearances", 0) or games_block.get("played", 0))
         if appearances <= 0:
             continue
@@ -466,60 +492,140 @@ def process_and_analyze_stats(player_data: Dict) -> Dict:
         for category, block in entry.items():
             if isinstance(block, dict):
                 for k, v in block.items():
+                    # Some values might be nested or strings; try converter
                     try:
                         aggregated[category][k] += float(v or 0)
                     except Exception:
+                        # se v for boolean/None ou outros, ignore
                         pass
 
     if total_games == 0:
-        # fallback: no data — return minimal structure with a conservative suggestion
-        return {"key_stats": {}, "recommendations": [{"market": "Jogador para Marcar", "recommendation": "Não", "confidence": 0.15, "reason": "Poucos dados disponíveis"}]}
+        # Sem jogos/estatísticas significativas
+        return {
+            "key_stats": {},
+            "recommendations": [
+                {
+                    "market": "Jogador para Marcar",
+                    "recommendation": "Não",
+                    "confidence": 0.15,
+                    "reason": "Dados limitados: poucas ou nenhuma aparição registrada."
+                }
+            ]
+        }
 
+    # Função utilitária para pegar estatísticas de categorias diferentes de forma segura
     def get_stat(cat, key):
         return aggregated.get(cat, {}).get(key, 0.0)
 
-    key_stats = {
-        "Gols (média/jogo)": f"{(get_stat('goals', 'total') / total_games):.2f}",
-        "Chutes no Gol (m/jogo)": f"{(get_stat('shots', 'on') / total_games):.2f}",
-        "Assistências (m/jogo)": f"{(get_stat('goals', 'assists') / total_games) if get_stat('goals','assists') else 0.00:.2f}"
-    }
-    recommendations = []
-    avg_goals = get_stat('goals', 'total') / total_games
-    shots_on = get_stat('shots', 'on') / total_games if total_games else 0.0
+    # Tentativas de normalizar vários nomes que a API pode usar
+    goals_total = get_stat('goals', 'total') or get_stat('goals', 'goals') or 0.0
+    assists_total = get_stat('goals', 'assists') or get_stat('goals', 'assists_total') or 0.0
 
-    # Primary recommendation: marcar
+    # Shots: pode aparecer em 'shots' ou 'shots' categoria com keys 'total'/'on'/'off'/'blocked'
+    shots_total = get_stat('shots', 'total') or get_stat('shots', 'shots_total') or get_stat('shots', 'shots') or 0.0
+    shots_on = get_stat('shots', 'on') or get_stat('shots', 'on_target') or get_stat('shots', 'shots_on') or 0.0
+    shots_blocked = get_stat('shots', 'blocked') or get_stat('shots', 'blocks') or 0.0
+    shots_off = shots_total - shots_on if shots_total and shots_on else get_stat('shots', 'off') or 0.0
+
+    passes_total = get_stat('passes', 'total') or 0.0
+    key_passes = get_stat('passes', 'key') or get_stat('passes', 'key_passes') or 0.0
+
+    tackles_total = get_stat('tackles', 'total') or 0.0
+    interceptions = get_stat('tackles', 'interceptions') or 0.0
+
+    # Estimativa simples de 'rebotes' (se há estatística direta, usa; senão tenta inferir)
+    rebounds_raw = get_stat('rebounds', 'total') or get_stat('shots', 'rebounds') or 0.0
+    if not rebounds_raw:
+        # inferência aproximada: bloqueados + remates fora (não é preciso, mas dá um proxy)
+        rebounds_raw = shots_blocked or 0.0
+
+    # médias por jogo
+    avg_goals = goals_total / total_games
+    avg_assists = assists_total / total_games
+    avg_shots_total = shots_total / total_games
+    avg_shots_on = shots_on / total_games
+    avg_passes = passes_total / total_games
+    avg_key_passes = key_passes / total_games
+    avg_rebounds = rebounds_raw / total_games if total_games else 0.0
+
+    key_stats = {
+        "Jogos (aparições)": f"{int(total_games)}",
+        "Gols (média/jogo)": f"{avg_goals:.2f}",
+        "Assistências (média/jogo)": f"{avg_assists:.2f}",
+        "Remates (média/jogo)": f"{avg_shots_total:.2f}",
+        "Remates no Gol (média/jogo)": f"{avg_shots_on:.2f}",
+        "Passes (média/jogo)": f"{avg_passes:.2f}",
+        "Key Passes (média/jogo)": f"{avg_key_passes:.2f}",
+        "Rebotes (estim.) (média/jogo)": f"{avg_rebounds:.2f}"
+    }
+
+    recommendations = []
+
+    # Recomendação primária: Jogador para Marcar
     if avg_goals > 0.35:
+        rec_conf = min(0.95, avg_goals / 0.7)  # escala a confiança
         recommendations.append({
             "market": "Jogador para Marcar",
             "recommendation": "Sim",
-            "confidence": min(0.95, avg_goals / 0.7),
-            "reason": f"Média de {avg_goals:.2f} gols por jogo."
+            "confidence": rec_conf,
+            "reason": f"Média de {avg_goals:.2f} gol(s) por jogo nas últimas aparições."
         })
     else:
-        # if low goals but decent shots, recommend 'chutes no gol' market
-        if shots_on >= 0.6:
+        # Se poucos golos mas muitos remates: sugerir mercado 'Chutes no Gol' ou 'Remates'
+        if avg_shots_on >= 0.6:
             recommendations.append({
                 "market": "Chutes no Gol",
                 "recommendation": "Acima de 0.5",
-                "confidence": min(0.6, shots_on / 2),
-                "reason": f"Média de {shots_on:.2f} chutes no gol por jogo."
+                "confidence": min(0.60, avg_shots_on / 2),
+                "reason": f"Média de {avg_shots_on:.2f} remates no golo por jogo."
+            })
+        elif avg_shots_total >= 1.2:
+            recommendations.append({
+                "market": "Remates (m/jogo)",
+                "recommendation": f"Acima de {max(1, int(avg_shots_total))}",
+                "confidence": min(0.55, avg_shots_total / 3),
+                "reason": f"Média de {avg_shots_total:.2f} remates por jogo."
             })
         else:
-            # fallback conservative recommendation
             recommendations.append({
                 "market": "Jogador para Marcar",
                 "recommendation": "Não",
                 "confidence": 0.18,
-                "reason": "Média de gols baixa."
+                "reason": "Média de golos baixa — sugestão conservadora."
             })
-    # Add secondary recommendation based on passes or defensive actions if present
-    passes_per_game = get_stat('passes', 'total') / total_games if total_games else 0.0
-    if passes_per_game > 10:
+
+    # Assistências
+    if avg_assists >= 0.25:
+        recommendations.append({
+            "market": "Assistências (jogador)",
+            "recommendation": "Acima de 0.5",
+            "confidence": min(0.65, avg_assists / 0.5),
+            "reason": f"Média de {avg_assists:.2f} assistências por jogo."
+        })
+
+    # Passes / Key passes
+    if avg_passes > 20:
         recommendations.append({
             "market": "Passes (m/jogo)",
-            "recommendation": f"Acima de {int(passes_per_game//5*5)}",
-            "confidence": 0.30,
-            "reason": f"Média de {passes_per_game:.2f} passes por jogo."
+            "recommendation": f"Acima de {int(max(20, (avg_passes//5)*5))}",
+            "confidence": min(0.5, avg_passes / 100),
+            "reason": f"Média de {avg_passes:.2f} passes por jogo."
+        })
+    if avg_key_passes >= 0.8:
+        recommendations.append({
+            "market": "Key Passes (jogador)",
+            "recommendation": "Acima de 0.5",
+            "confidence": min(0.5, avg_key_passes / 2),
+            "reason": f"Média de {avg_key_passes:.2f} key passes por jogo."
+        })
+
+    # Rebounds / remates bloqueados
+    if avg_rebounds >= 0.3:
+        recommendations.append({
+            "market": "Rebotes/Remates bloqueados (estim.)",
+            "recommendation": "Acima de 0.5",
+            "confidence": min(0.45, avg_rebounds / 1),
+            "reason": f"Estimativa de {avg_rebounds:.2f} por jogo (base em remates bloqueados/estatísticas disponíveis)."
         })
 
     # Guarantee at least one recommendation (shouldn't be empty)
@@ -528,8 +634,9 @@ def process_and_analyze_stats(player_data: Dict) -> Dict:
             "market": "Jogador para Marcar",
             "recommendation": "Não",
             "confidence": 0.15,
-            "reason": "Fallback sem dados suficientemente fortes."
+            "reason": "Dados limitados: nenhuma métrica suficientemente forte para recomendação positiva."
         })
+
     return {"key_stats": key_stats, "recommendations": recommendations}
 
 def analyze_player(player_id: int, season: int = datetime.now().year) -> Optional[Dict]:
@@ -553,7 +660,12 @@ def analyze_player(player_id: int, season: int = datetime.now().year) -> Optiona
         # ensure there is at least one recommendation
         recs = analysis_result.get("recommendations") or []
         if not recs:
-            recs = [{"market": "Jogador para Marcar", "recommendation": "Não", "confidence": 0.15, "reason": "Fallback"}]
+            recs = [{
+                "market": "Jogador para Marcar",
+                "recommendation": "Não",
+                "confidence": 0.15,
+                "reason": "Dados limitados — fallback conservador."
+            }]
             analysis_result["recommendations"] = recs
         return {"player_info": player_info, **analysis_result}
     except requests.exceptions.RequestException as e:
@@ -567,7 +679,7 @@ def analyze_player_stats(player_id: int, season: int = datetime.now().year):
     return analyze_player(player_id, season)
 
 # =========================
-# FORMATAÇÃO das saídas textuais
+# FORMATAÇÃO das saídas textuais (WhatsApp-friendly)
 # =========================
 def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -> str:
     if not game_analysis or 'raw_fixture' not in game_analysis:
@@ -582,9 +694,13 @@ def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -
         lines.append("_Nenhuma dica principal encontrada._")
     else:
         for pick in top3:
-            line = f"- *{pick.get('market')}*: {pick.get('recommendation', 'N/A')} (conf: {pick.get('confidence'):.2f})"
+            conf_txt = format_conf_pct(pick.get('confidence'))
+            line = f"- *{pick.get('market')}*: {pick.get('recommendation', 'N/A')} (conf: {conf_txt})"
             if pick.get("reason"):
                 line += f" — {pick.get('reason')}"
+            # if odds/book present, include
+            if pick.get("best_book"):
+                line += f" [{pick.get('best_book')} {pick.get('best_odd')}]"
             lines.append(line)
     lines.append("\n👤 *OptaIA — Jogadores em Destaque*")
     if not players_analysis:
@@ -594,13 +710,19 @@ def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -
             if player_result and player_result.get('player_info'):
                 p_info = player_result['player_info']
                 recs = player_result.get('recommendations', [])
+                key_stats = player_result.get('key_stats', {})
                 lines.append(f"\n*{p_info.get('name')}* ({p_info.get('team')})")
+                # mostrar key stats resumidas
+                if key_stats:
+                    ks_line = "  • " + " | ".join([f"{k}: {v}" for k, v in key_stats.items() if v is not None])
+                    lines.append(ks_line)
                 if not recs:
                     lines.append("  - Sem dicas de aposta específicas.")
                 else:
                     for rec in recs:
-                        lines.append(f"  - *{rec.get('market')}*: {rec.get('recommendation')} (conf: {rec.get('confidence'):.2f}) — {rec.get('reason','')}")
-    lines.append("\n_Lembre-se: analise por conta própria._")
+                        conf_txt = format_conf_pct(rec.get('confidence'))
+                        lines.append(f"  - *{rec.get('market')}*: {rec.get('recommendation')} (conf: {conf_txt}) — {rec.get('reason','')}")
+    lines.append("\n_Lembre-se: analise por conta própria — estas são sugestões automáticas._")
     return "\n".join(lines)
 
 def format_live_analysis(radar_data: dict, live_tips: list) -> str:
@@ -616,13 +738,20 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
     away_score = score.get('away', 0)
     lines = [f"⚡ *Análise Ao Vivo — {home_team} {home_score} x {away_score} {away_team}*"]
     lines.append(f"\n📡 RadarIA — Status: {status.get('long')}")
-    lines.append(f"\n📊 Estatísticas resumo (ex): Poss/Chutes/Escanteios")
+    # resumo estatístico rápido (se disponível)
+    try:
+        poss_home = radar_data.get('fixture', {}).get('status', {}).get('elapsed')
+    except Exception:
+        poss_home = None
+    lines.append(f"\n📊 Estatísticas resumo (ex): Remates / Poss / Escanteios")
     if not live_tips:
         lines.append("\n_Sem dicas ao vivo no momento._")
     else:
         lines.append("\n💡 *Dicas ao vivo:*")
         for tip in live_tips:
-            lines.append(f"- {tip.get('market')}: {tip.get('recommendation')} (conf: {tip.get('confidence'):.2f}) — {tip.get('reason')}")
+            conf_txt = format_conf_pct(tip.get('confidence'))
+            lines.append(f"- {tip.get('market')}: {tip.get('recommendation')} (conf: {conf_txt}) — {tip.get('reason')}")
+    lines.append("\n_Lembre-se: apostas ao vivo são voláteis — jogue com responsabilidade._")
     return "\n".join(lines)
 
 # =========================
@@ -881,9 +1010,11 @@ def api_players_old():
         analysis = analyze_player(int(player_id), int(season))
         if analysis is None:
             return jsonify({"error": "Nenhum dado encontrado"}), 404
-        return jsonify({"opta": analysis}), 200
+        analysis_text = format_full_pre_game_analysis({}, [analysis])
+        return jsonify({"opta": {**analysis, "analysis_text": analysis_text}}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/opta-player", methods=["POST"])
 def api_opta_player_post():
@@ -896,7 +1027,8 @@ def api_opta_player_post():
         analysis = analyze_player(int(player_id), int(season))
         if analysis is None:
             return jsonify({"error": "Nenhum dado encontrado"}), 404
-        return jsonify({"opta": analysis}), 200
+        analysis_text = format_full_pre_game_analysis({}, [analysis])
+        return jsonify({"opta": {**analysis, "analysis_text": analysis_text}}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
