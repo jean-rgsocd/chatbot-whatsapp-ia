@@ -274,9 +274,13 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
                 return side_stats.get(k) or 0
         return 0
 
+    # ✅ separa remates totais e remates no gol
+    home_shots_total = get_stat(home_stats, 'total_shots', 'shots_total', 'shots')
+    away_shots_total = get_stat(away_stats, 'total_shots', 'shots_total', 'shots')
+    total_shots = (home_shots_total or 0) + (away_shots_total or 0)
+
     home_shots_on = get_stat(home_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
     away_shots_on = get_stat(away_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
-    total_shots = (home_shots or 0) + (away_shots or 0)
 
     home_corners = get_stat(home_stats, 'corner_kicks', 'corners', 'corner_kicks_full')
     away_corners = get_stat(away_stats, 'corner_kicks', 'corners', 'corner_kicks_full')
@@ -290,7 +294,7 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
             "confidence": confidence
         })
 
-        # =========================
+    # =========================
     # 🔮 Estimativa de acréscimos baseada em eventos
     # =========================
     def estimate_extra_time(events: list, half: int = 1) -> int:
@@ -320,6 +324,19 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
                     total_seconds += 60
         return (total_seconds + 59) // 60
 
+    # calcula acréscimo estimado e adiciona como dica
+    if 35 <= elapsed < 45:
+        extra_est = estimate_extra_time(radar_data.get("events", []), half=1)
+        add_tip("Acréscimo 1º Tempo",
+                f"Estimado: {extra_est} minutos",
+                "Baseado nos eventos ocorridos no 1º tempo", 0.65)
+
+    if 80 <= elapsed < 90:
+        extra_est = estimate_extra_time(radar_data.get("events", []), half=2)
+        add_tip("Acréscimo 2º Tempo",
+                f"Estimado: {extra_est} minutos",
+                "Baseado nos eventos ocorridos no 2º tempo", 0.65)
+
     # =========================
     # Sugestões baseadas em estatísticas
     # =========================
@@ -331,9 +348,9 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
             add_tip("Gols Asiáticos", f"Menos de {total_goals + 1.5}",
                     f"Apenas {total_shots} remates", 0.65)
 
-    if (home_shots or 0) > 3 and (away_shots or 0) > 3 and total_goals < 3:
+    if (home_shots_total or 0) > 3 and (away_shots_total or 0) > 3 and total_goals < 3:
         add_tip("Ambas Marcam", "Sim",
-                f"Ambas as equipas rematam ({home_shots} vs {away_shots})", 0.75)
+                f"Ambas as equipas rematam ({home_shots_total} vs {away_shots_total})", 0.75)
 
     if elapsed > 25:
         if total_corners > 5:
