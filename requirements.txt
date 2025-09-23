@@ -1,6 +1,4 @@
 flask
-fastapi
 requests
 python-dotenv
-twilio
 gunicorn
