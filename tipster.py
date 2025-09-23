@@ -290,43 +290,35 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
             "confidence": confidence
         })
 
-    # =========================
+        # =========================
     # 🔮 Estimativa de acréscimos baseada em eventos
     # =========================
     def estimate_extra_time(events: list, half: int = 1) -> int:
-    total_seconds = 0
-    for ev in events:
-        minute = ev.get("time", {}).get("elapsed") or 0
+        total_seconds = 0
+        for ev in events:
+            minute = ev.get("time", {}).get("elapsed") or 0
 
-        # filtra eventos por tempo
-        if half == 1 and minute > 45:
-            continue
-        if half == 2 and minute <= 45:
-            continue
+            # filtra eventos por tempo
+            if half == 1 and minute > 45:
+                continue
+            if half == 2 and minute <= 45:
+                continue
 
-        cat = ev.get("category", "").lower()
-        if "falta" in cat:
-            total_seconds += 15
-        elif "amarelo" in cat:
-            total_seconds += 30
-        elif "gol" in cat:
-            total_seconds += 60
-        elif "var" in cat:
-            start = ev.get("start_time")
-            end = ev.get("end_time")
-            if start and end:
-                total_seconds += max(int(end - start), 60)
-            else:
+            cat = ev.get("category", "").lower()
+            if "falta" in cat:
+                total_seconds += 15
+            elif "amarelo" in cat:
+                total_seconds += 30
+            elif "gol" in cat:
                 total_seconds += 60
-    return (total_seconds + 59) // 60
-
-    if 35 <= elapsed < 45:
-    extra_est = estimate_extra_time(radar_data.get("events", []), half=1)
-    lines.append(f"⏱️ Estimativa de Acréscimo (1ºT): {extra_est} minutos")
-
-if 80 <= elapsed < 90:
-    extra_est = estimate_extra_time(radar_data.get("events", []), half=2)
-    lines.append(f"⏱️ Estimativa de Acréscimo (2ºT): {extra_est} minutos")
+            elif "var" in cat:
+                start = ev.get("start_time")
+                end = ev.get("end_time")
+                if start and end:
+                    total_seconds += max(int(end - start), 60)
+                else:
+                    total_seconds += 60
+        return (total_seconds + 59) // 60
 
     # =========================
     # Sugestões baseadas em estatísticas
@@ -369,6 +361,7 @@ if 80 <= elapsed < 90:
                     "Sugestão conservadora devido a pouca atividade", 0.40)
 
     return tips
+
 # =========================
 # RADAR IA (ao vivo) — funções consolidadas
 # =========================
