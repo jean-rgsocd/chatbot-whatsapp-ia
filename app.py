@@ -1,164 +1,207 @@
-#!/usr/bin/env python3
-"""
-Simple Flask WhatsApp chatbot wrapper for Betting IA components.
-- Exposes POST /webhook for Twilio WhatsApp to call when a message arrives.
-- Supports commands (case-insensitive):
-    "jogos hoje" or "jogos de hoje" -> lists today's matches via sports_betting_analyzer.get_games_by_sport wrapper
-    "analisar <n>" -> analyze pre-game for match index n as returned previously
-    "ao vivo <n>" -> live analysis for match index n (radar + tipster)
-    "help" -> usage
-Note: This project uses your modules copied into the package: sports_betting_analyzer.py, radar_ia.py, opta_ia.py
-You must set environment variables (see .env.example) and configure Twilio to point to /webhook.
-"""
-
-import os, json, traceback
-from flask import Flask, request, Response
+# app.py (VERSÃO CORRIGIDA E INTEGRADA)
+import os
+import json
+import traceback
+from flask import Flask, request
 from dotenv import load_dotenv
+from twilio.twiml.messaging_response import MessagingResponse
+
+# Carrega variáveis de ambiente do .env (para testes locais)
 load_dotenv()
 
-# try to import user modules
+# Tenta importar os módulos de análise
 try:
     import sports_betting_analyzer as sba
-except Exception as e:
+except ImportError:
+    print("AVISO: Módulo 'sports_betting_analyzer' não encontrado.")
     sba = None
 try:
     import radar_ia as radar
-except Exception as e:
+except ImportError:
+    print("AVISO: Módulo 'radar_ia' não encontrado.")
     radar = None
+# O módulo opta_ia não é usado nos comandos atuais, mas mantemos o import
 try:
     import opta_ia as opta
-except Exception as e:
+except ImportError:
     opta = None
-
-# Twilio helper (format reply) using TwiML
-from twilio.twiml.messaging_response import MessagingResponse
 
 app = Flask(__name__)
 
-# In-memory cache for last games per phone number (simple demo)
+# Cache simples na memória para guardar a última lista de jogos por usuário
 LAST_GAMES = {}
 
-def safe_call(module, names, *args, **kwargs):
-    \"\"\"Try to call first available function name from `names` in module.\"\"\"
-    if not module:
-        return None
-    for n in names:
-        fn = getattr(module, n, None)
-        if callable(fn):
-            try:
-                return fn(*args, **kwargs)
-            except Exception:
-                # swallow and continue - caller should inspect results
-                traceback.print_exc()
-    return None
+def format_pre_game_analysis(analysis: dict) -> str:
+    """Formata a análise pré-jogo para uma mensagem clara no WhatsApp."""
+    if not analysis or 'summary' not in analysis:
+        return "Não foi possível obter a análise para este jogo."
 
-def list_games_for_sport(sport):
-    # Wrapper: call possible get_games_by_sport or partidas-por-esporte style functions.
-    # We'll try known function names from typical user file.
-    names = [
-        "get_games_by_sport", "partidas_por_esporte", "get_games_for_sport", "get_matches_by_sport",
-        "partidas_por_esporte", "get_games_by_sport"
+    summary = analysis.get('summary', {})
+    top3 = analysis.get('top3', [])
+    
+    home_team = summary.get('home_team', 'Casa')
+    away_team = summary.get('away_team', 'Visitante')
+
+    lines = [
+        f"Análise Pré-Jogo: *{home_team} vs {away_team}*",
+        f"Poder de Fogo (Casa): {summary.get('home_power', 'N/A')}",
+        f"Poder de Fogo (Visitante): {summary.get('away_power', 'N/A')}",
+        "---",
+        "*Principais Palpites:*",
     ]
-    # try module-level function
-    res = safe_call(sba, names, sport)
-    # if result is dict with 'response', normalize list
-    if isinstance(res, dict) and "response" in res:
-        return res.get("response") or []
-    if isinstance(res, list):
-        return res
-    return []
 
-def analyze_pre_game(game_id, sport):
-    # call sba.analisar_pre_jogo or analyze_match etc.
-    names = ["analisar_pre_jogo", "analyze_match", "analyze_pre_game", "analisar_pre_jogo"]
-    return safe_call(sba, names, game_id, sport) or []
+    for i, pick in enumerate(top3, 1):
+        market = pick.get('market', '').replace('_', ' ').title()
+        rec = pick.get('recommendation', 'N/A')
+        conf = pick.get('confidence', 0)
+        odd = pick.get('best_odd', None)
+        
+        line = f"{i}. *{market}*: {rec} (Confiança: {conf:.0%})"
+        if odd:
+            line += f" - Melhor Odd: *{odd}*"
+        lines.append(line)
+        
+    lines.append("\n_Lembre-se: analise por conta própria. Odds podem variar._")
+    return "\n".join(lines)
 
-def analyze_live(game_id, sport):
-    names = ["analisar_ao_vivo", "analyze_live", "analyze_in_play", "analisar_ao_vivo"]
-    live = safe_call(sba, names, game_id, sport)
-    # also try radar combined
-    radar_info = safe_call(radar, ["live_summary", "analyze_live", "radar_live", "get_live_stats"], game_id) or {}
-    if isinstance(live, list):
-        return {"live": live, "radar": radar_info}
-    return {"live": live or [], "radar": radar_info}
+def format_live_analysis(analysis: dict) -> str:
+    """Formata a análise ao vivo para uma mensagem clara no WhatsApp."""
+    if not analysis or 'fixture' not in analysis:
+        return "Não foi possível obter os dados ao vivo para este jogo."
+
+    fixture = analysis.get('fixture', {})
+    teams = analysis.get('teams', {})
+    score = analysis.get('score', {}).get('fulltime', {})
+    status = fixture.get('status', {})
+    stats = analysis.get('statistics', {}).get('home', {}) # Pegando stats da casa como exemplo
+
+    home_team = teams.get('home', {}).get('name', 'Casa')
+    away_team = teams.get('away', {}).get('name', 'Visitante')
+    home_score = score.get('home', 0)
+    away_score = score.get('away', 0)
+    elapsed = status.get('elapsed', '?')
+
+    lines = [
+        f"Análise Ao Vivo: *{home_team} {home_score} x {away_score} {away_team}* ({elapsed}')",
+        "---",
+        f"*Estatísticas (Casa):*",
+        f"Chutes: {stats.get('total_shots', 'N/A')}",
+        f"Posse de Bola: {stats.get('possession', 'N/A')}",
+        f"Escanteios: {stats.get('corners', 'N/A')}",
+        "---",
+        "*Eventos Recentes:*"
+    ]
+    
+    events = analysis.get('events', [])
+    for event in events[:5]: # Pega os 5 eventos mais recentes
+        time = event.get('display_time', '')
+        category = event.get('category', 'Evento')
+        player = event.get('player', '')
+        detail = event.get('detail', '')
+        lines.append(f"- {time} *{category}*: {player} ({detail})")
+
+    return "\n".join(lines)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        incoming = request.form.get("Body", "").strip()
+        incoming_msg = request.form.get("Body", "").strip()
         from_number = request.form.get("From", "unknown")
-        # basic parsing
-        text = incoming.lower()
+        text = incoming_msg.lower()
+        
         resp = MessagingResponse()
         msg = resp.message()
-        if text in ("hi", "hello", "olá", "ola", "help"):
-            msg.body(\"\"\"Olá! Comandos disponíveis:
-- 'jogos hoje' -> lista jogos de hoje (football)
-- 'analisar <n>' -> analisa pré-jogo do índice retornado
-- 'ao vivo <n>' -> análise ao vivo do índice retornado
-Use 'jogos hoje' primeiro e escolha o número do jogo (ex: 'analisar 1').\"\"\")
+
+        if text in ("hi", "hello", "olá", "ola", "help", "ajuda"):
+            msg.body(
+                "Olá! Comandos disponíveis:\n"
+                "- *'jogos hoje'* -> Lista os principais jogos de hoje.\n"
+                "- *'analisar <n>'* -> Faz uma análise pré-jogo completa.\n"
+                "- *'ao vivo <n>'* -> Mostra estatísticas da partida em tempo real."
+            )
             return str(resp)
+
         if text.startswith("jogos"):
-            # default to football
-            sport = "football"
-            games = list_games_for_sport(sport)
+            # CHAMA A FUNÇÃO CORRETA: sba.get_fixtures_for_dates
+            games = sba.get_fixtures_for_dates(days_forward=0) if sba else []
+            
             if not games:
-                msg.body(\"Nenhum jogo encontrado para hoje.\")
+                msg.body("Nenhum jogo encontrado para hoje.")
                 return str(resp)
-            # store for user
+
             LAST_GAMES[from_number] = games
-            lines = [\"Jogos de hoje:\"]
-            for i,g in enumerate(games[:20], start=1):
-                try:
-                    # each g might be dict with home/away/time
-                    home = g.get('home') if isinstance(g, dict) else str(g)
-                    away = g.get('away') if isinstance(g, dict) else ""
-                    time = g.get('time', '') if isinstance(g, dict) else ""
-                    lines.append(f\"{i}. {home} x {away} ({time})\")
-                except Exception:
-                    lines.append(str(g))
-            lines.append(\"\\nResponda: 'analisar <n>' ou 'ao vivo <n>'\")
-            msg.body(\"\\n\".join(lines))
+            lines = ["*Jogos de hoje:*"]
+            for i, game in enumerate(games[:20], start=1):
+                home = game.get('teams', {}).get('home', {}).get('name', 'Time A')
+                away = game.get('teams', {}).get('away', {}).get('name', 'Time B')
+                league = game.get('league', {}).get('name', 'Liga')
+                lines.append(f"{i}. {home} x {away} ({league})")
+            
+            lines.append("\nResponda com 'analisar <n>' ou 'ao vivo <n>' (ex: analisar 1)")
+            msg.body("\n".join(lines))
             return str(resp)
+
         if text.startswith("analisar"):
             parts = text.split()
             if len(parts) < 2 or not parts[1].isdigit():
-                msg.body(\"Uso: analisar <n>\")
+                msg.body("Comando inválido. Use o formato: *analisar 1*")
                 return str(resp)
+            
             idx = int(parts[1]) - 1
             games = LAST_GAMES.get(from_number, [])
-            if idx < 0 or idx >= len(games):
-                msg.body(\"Índice inválido. Use 'jogos hoje' primeiro.\")
+            
+            if not (0 <= idx < len(games)):
+                msg.body("Índice de jogo inválido. Envie 'jogos hoje' primeiro para ver a lista.")
                 return str(resp)
-            g = games[idx]
-            game_id = g.get('game_id') or g.get('fixture', {}).get('id') or g.get('id')
-            sport = 'football'
-            analysis = analyze_pre_game(game_id, sport)
-            msg.body(f\"Análise pré-jogo:\\n{json.dumps(analysis, ensure_ascii=False, indent=2)[:1500]}\")
+            
+            game = games[idx]
+            game_id = game.get('game_id')
+            
+            if not game_id:
+                 msg.body("Não foi possível encontrar o ID deste jogo para análise.")
+                 return str(resp)
+            
+            # CHAMA A FUNÇÃO CORRETA: sba.analyze
+            analysis = sba.analyze(game_id=game_id) if sba else None
+            formatted_response = format_pre_game_analysis(analysis)
+            msg.body(formatted_response)
             return str(resp)
+
         if text.startswith("ao vivo"):
             parts = text.split()
             if len(parts) < 2 or not parts[1].isdigit():
-                msg.body(\"Uso: ao vivo <n>\")
+                msg.body("Comando inválido. Use o formato: *ao vivo 1*")
                 return str(resp)
+                
             idx = int(parts[1]) - 1
             games = LAST_GAMES.get(from_number, [])
-            if idx < 0 or idx >= len(games):
-                msg.body(\"Índice inválido. Use 'jogos hoje' primeiro.\")
+
+            if not (0 <= idx < len(games)):
+                msg.body("Índice de jogo inválido. Envie 'jogos hoje' primeiro para ver a lista.")
                 return str(resp)
-            g = games[idx]
-            game_id = g.get('game_id') or g.get('fixture', {}).get('id') or g.get('id')
-            sport = 'football'
-            analysis = analyze_live(game_id, sport)
-            msg.body(f\"Análise ao vivo:\\n{json.dumps(analysis, ensure_ascii=False, indent=2)[:1500]}\")
+
+            game = games[idx]
+            game_id = game.get('game_id')
+
+            if not game_id:
+                 msg.body("Não foi possível encontrar o ID deste jogo para análise.")
+                 return str(resp)
+
+            # CHAMA A FUNÇÃO CORRETA: radar.stats_aovivo
+            analysis = radar.stats_aovivo(game_id=game_id) if radar else None
+            formatted_response = format_live_analysis(analysis)
+            msg.body(formatted_response)
             return str(resp)
-        msg.body(\"Comando não reconhecido. Envie 'help' para ver comandos.\")
+
+        msg.body("Comando não reconhecido. Envie 'ajuda' para ver os comandos disponíveis.")
         return str(resp)
+
     except Exception as e:
+        traceback.print_exc()
         resp = MessagingResponse()
-        resp.message(f\"Erro interno: {str(e)}\")
+        resp.message(f"Ocorreu um erro interno ao processar seu pedido. Tente novamente mais tarde.")
         return str(resp), 500
 
 if __name__ == '__main__':
-    # local dev run
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8000)), debug=True)
+    port = int(os.getenv('PORT', 8000))
+    app.run(host='0.0.0.0', port=port, debug=True)
