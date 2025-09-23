@@ -1,9 +1,9 @@
-# app.py (VERSÃO REFINADA COM FILTRO DE LIGAS E MELHOR ANÁLISE)
+# app.py (VERSÃO FINAL E COMPLETA PARA META API)
 import os
 import traceback
+import requests
 from flask import Flask, request
 from dotenv import load_dotenv
-from twilio.twiml.messaging_response import MessagingResponse
 from datetime import datetime
 
 # Carrega variáveis de ambiente
@@ -22,26 +22,19 @@ except ImportError: opta = None
 
 app = Flask(__name__)
 
-# ATUALIZAÇÃO: IDs das principais ligas para filtrar
+# --- VARIÁVEIS DE AMBIENTE PARA A META ---
+META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
+META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN")
+META_PHONE_NUMBER_ID = os.environ.get("META_PHONE_NUMBER_ID")
+
+# IDs das principais ligas para filtrar
 PRINCIPAL_LEAGUE_IDS = {
-    39, # Premier League (Inglaterra)
-    140, # La Liga (Espanha)
-    135, # Serie A (Itália)
-    78, # Bundesliga (Alemanha)
-    61, # Ligue 1 (França)
-    2, # Champions League (Europa)
-    3, # Europa League (Europa)
-    71, # Brasileirão Série A (Brasil)
-    253, # MLS (EUA)
-    281, # Saudi League (Arábia Saudita)
-    88, # Eredivisie (Holanda)
-    94, # Primeira Liga (Portugal)
+    39, 140, 135, 78, 61, 2, 3, 71, 253, 281, 88, 94,
 }
 
 # Dicionário para gerenciar o estado da conversa de cada usuário
 USER_STATE = {}
 
-# (As funções de formatação de análise permanecem as mesmas)
 def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -> str:
     if not game_analysis or 'summary' not in game_analysis:
         return "Não foi possível obter a análise para este jogo."
@@ -68,7 +61,6 @@ def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -
     lines.append("\n_Lembre-se: analise por conta própria._")
     return "\n".join(lines)
 
-
 def format_live_analysis(radar_data: dict, live_tips: list) -> str:
     if not radar_data or 'fixture' not in radar_data:
         return "Não foi possível obter os dados ao vivo para este jogo."
@@ -87,116 +79,112 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
         for tip in live_tips: lines.append(f"- *{tip.get('market')}*: {tip.get('recommendation')} (_{tip.get('reason')}_)")
     return "\n".join(lines)
 
-
 def get_greeting():
     current_hour = datetime.now().hour
     if 5 <= current_hour < 12: return "Bom dia"
     elif 12 <= current_hour < 18: return "Boa tarde"
     else: return "Boa noite"
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
+def send_whatsapp_message(to_number, message_text):
+    """Função para enviar mensagens usando a API da Meta."""
+    url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {META_ACCESS_TOKEN}", "Content-Type": "application/json"}
+    payload = {"messaging_product": "whatsapp", "to": to_number, "text": {"body": message_text}}
     try:
-        incoming_msg = request.form.get("Body", "").strip().lower()
-        from_number = request.form.get("From", "unknown")
-        resp = MessagingResponse()
-        msg = resp.message()
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao enviar mensagem: {e.response.text}")
 
-        if from_number not in USER_STATE:
-            USER_STATE[from_number] = {'step': 'welcome'}
-        user_step = USER_STATE[from_number].get('step')
-
-        # --- LÓGICA DE ESCOLHA DE JOGO (INPUT NUMÉRICO) ---
-        if incoming_msg.isdigit():
-            idx = int(incoming_msg) - 1
-            game_list_type = ""
-            if user_step == 'awaiting_pre_game_choice': game_list_type = 'pre_games'
-            elif user_step == 'awaiting_live_game_choice': game_list_type = 'live_games'
-
-            if game_list_type:
-                games = USER_STATE[from_number].get(game_list_type, [])
-                if 0 <= idx < len(games):
-                    game = games[idx]
-                    game_id = game.get('game_id')
-                    
-                    if game_list_type == 'pre_games':
-                        # Lógica de análise pré-jogo completa
-                        game_analysis = sba.analyze(game_id=game_id) if sba else None
-                        players_analysis = []
-                        if opta:
-                            # ATUALIZAÇÃO: Analisa um jogador de cada time
-                            home_team_id = game.get('teams', {}).get('home', {}).get('id')
-                            away_team_id = game.get('teams', {}).get('away', {}).get('id')
-                            for team_id in [home_team_id, away_team_id]:
-                                players = opta.get_players_for_team(team_id=team_id)
-                                if players:
-                                    analysis = opta.analyze_player(player_id=players[0]['id'])
-                                    if analysis: players_analysis.append(analysis)
-                        response_text = format_full_pre_game_analysis(game_analysis, players_analysis)
-                    else: # live_games
-                        # Lógica de análise ao vivo completa
-                        radar_analysis = radar.stats_aovivo(game_id=game_id) if radar else None
-                        live_tips = sba.analyze_live_from_stats(radar_analysis) if sba and radar_analysis else []
-                        response_text = format_live_analysis(radar_analysis, live_tips)
-                    
-                    msg.body(response_text)
-                    USER_STATE[from_number]['step'] = 'welcome' # Reseta o estado
-                else:
-                    msg.body("Número inválido. Por favor, escolha um número da lista.")
-            else:
-                # Se o usuário enviar um número sem um contexto, mostre o menu principal
-                msg.body(f"{get_greeting()}! Bem-vindo(a) ao Betting IA.\n\nEscolha uma opção:\n1. Jogos Pré-Live\n2. Jogos Ao Vivo")
-                USER_STATE[from_number]['step'] = 'awaiting_menu_choice'
-        
-        # --- LÓGICA DE NAVEGAÇÃO NO MENU (INPUT DE TEXTO) ---
+@app.route("/webhook", methods=["GET", "POST"])
+def webhook():
+    if request.method == "GET":
+        if request.args.get("hub.mode") == "subscribe" and request.args.get("hub.verify_token") == META_VERIFY_TOKEN:
+            return request.args.get("hub.challenge"), 200
         else:
-            if "pré" in incoming_msg or "pre" in incoming_msg or "1" == incoming_msg:
-                all_games = sba.get_fixtures_for_dates(days_forward=0) if sba else []
-                # ATUALIZAÇÃO: Filtra apenas jogos de ligas principais e que ainda não começaram
-                pre_games = [g for g in all_games if g['league'].get('id') in PRINCIPAL_LEAGUE_IDS and g['type'] == 'scheduled']
-                if not pre_games:
-                    msg.body("Nenhum jogo pré-live das principais ligas encontrado para hoje.")
-                else:
-                    USER_STATE[from_number]['step'] = 'awaiting_pre_game_choice'
-                    USER_STATE[from_number]['pre_games'] = pre_games
-                    lines = ["*Jogos Pré-Live (Principais Ligas):*\n"]
-                    for i, game in enumerate(pre_games[:20], start=1):
-                        home = game.get('teams', {}).get('home', {}).get('name', 'Time A')
-                        away = game.get('teams', {}).get('away', {}).get('name', 'Time B')
-                        lines.append(f"{i}. {home} x {away}")
-                    lines.append("\nDigite o número do jogo para receber a análise completa.")
-                    msg.body("\n".join(lines))
+            return "Verification token mismatch", 403
 
-            elif "vivo" in incoming_msg or "2" == incoming_msg:
-                all_games = sba.get_fixtures_for_dates(days_forward=0) if sba else []
-                # ATUALIZAÇÃO: Filtra apenas jogos de ligas principais que estão ao vivo
-                live_games = [g for g in all_games if g['league'].get('id') in PRINCIPAL_LEAGUE_IDS and g['type'] == 'live']
-                if not live_games:
-                    msg.body("Nenhum jogo das principais ligas acontecendo no momento.")
-                else:
-                    USER_STATE[from_number]['step'] = 'awaiting_live_game_choice'
-                    USER_STATE[from_number]['live_games'] = live_games
-                    lines = ["*Jogos Acontecendo Agora (Principais Ligas):*\n"]
-                    for i, game in enumerate(live_games[:20], start=1):
-                        home = game.get('teams', {}).get('home', {}).get('name', 'Time A')
-                        away = game.get('teams', {}).get('away', {}).get('name', 'Time B')
-                        lines.append(f"{i}. {home} x {away}")
-                    lines.append("\nDigite o número do jogo para receber a análise ao vivo.")
-                    msg.body("\n".join(lines))
-            
-            else:
-                # Qualquer outra mensagem mostra o menu principal
-                msg.body(f"{get_greeting()}! Bem-vindo(a) ao Betting IA.\n\nEscolha uma opção:\n1. Jogos Pré-Live\n2. Jogos Ao Vivo")
-                USER_STATE[from_number]['step'] = 'awaiting_menu_choice'
+    if request.method == "POST":
+        try:
+            data = request.get_json()
+            if data.get("object") == "whatsapp_business_account":
+                for entry in data.get("entry", []):
+                    for change in entry.get("changes", []):
+                        if change.get("field") == "messages":
+                            message_data = change.get("value", {}).get("messages", [{}])[0]
+                            from_number = message_data.get("from")
+                            incoming_msg = message_data.get("text", {}).get("body", "").strip().lower()
+                            response_text = ""
 
-        return str(resp)
+                            if from_number not in USER_STATE:
+                                USER_STATE[from_number] = {'step': 'welcome'}
+                            user_step = USER_STATE[from_number].get('step')
 
-    except Exception:
-        traceback.print_exc()
-        resp = MessagingResponse()
-        resp.message("Ocorreu um erro interno. A equipe já foi notificada.")
-        return str(resp), 500
+                            if incoming_msg.isdigit():
+                                idx = int(incoming_msg) - 1
+                                game_list_type = ""
+                                if user_step == 'awaiting_pre_game_choice': game_list_type = 'pre_games'
+                                elif user_step == 'awaiting_live_game_choice': game_list_type = 'live_games'
+                                
+                                if game_list_type:
+                                    games = USER_STATE[from_number].get(game_list_type, [])
+                                    if 0 <= idx < len(games):
+                                        game = games[idx]; game_id = game.get('game_id')
+                                        if game_list_type == 'pre_games':
+                                            game_analysis = sba.analyze(game_id=game_id) if sba else None
+                                            players_analysis = []
+                                            if opta:
+                                                team_ids = [game.get('teams', {}).get(side, {}).get('id') for side in ['home', 'away']]
+                                                for team_id in team_ids:
+                                                    if team_id:
+                                                        players = opta.get_players_for_team(team_id=team_id)
+                                                        if players:
+                                                            analysis = opta.analyze_player(player_id=players[0]['id'])
+                                                            if analysis: players_analysis.append(analysis)
+                                            response_text = format_full_pre_game_analysis(game_analysis, players_analysis)
+                                        else: # live_games
+                                            radar_analysis = radar.stats_aovivo(game_id=game_id) if radar else None
+                                            live_tips = sba.analyze_live_from_stats(radar_analysis) if sba and radar_analysis else []
+                                            response_text = format_live_analysis(radar_analysis, live_tips)
+                                        USER_STATE[from_number]['step'] = 'welcome'
+                                    else:
+                                        response_text = "Número inválido. Por favor, escolha um número da lista."
+                                else:
+                                    response_text = f"{get_greeting()}! Bem-vindo(a) ao Betting IA.\n\nEscolha uma opção:\n1. Jogos Pré-Live\n2. Jogos Ao Vivo"
+                                    USER_STATE[from_number]['step'] = 'awaiting_menu_choice'
+                            else:
+                                if "pré" in incoming_msg or "pre" in incoming_msg or "1" == incoming_msg:
+                                    all_games = sba.get_fixtures_for_dates(days_forward=0) if sba else []
+                                    pre_games = [g for g in all_games if g['league'].get('id') in PRINCIPAL_LEAGUE_IDS and g['type'] == 'scheduled']
+                                    if not pre_games:
+                                        response_text = "Nenhum jogo pré-live das principais ligas encontrado para hoje."
+                                    else:
+                                        USER_STATE[from_number] = {'step': 'awaiting_pre_game_choice', 'pre_games': pre_games}
+                                        lines = ["*Jogos Pré-Live (Principais Ligas):*\n"]
+                                        for i, game in enumerate(pre_games[:20], start=1):
+                                            lines.append(f"{i}. {game['teams']['home']['name']} x {game['teams']['away']['name']}")
+                                        lines.append("\nDigite o número do jogo para receber a análise completa.")
+                                        response_text = "\n".join(lines)
+                                elif "vivo" in incoming_msg or "2" == incoming_msg:
+                                    all_games = sba.get_fixtures_for_dates(days_forward=0) if sba else []
+                                    live_games = [g for g in all_games if g['league'].get('id') in PRINCIPAL_LEAGUE_IDS and g['type'] == 'live']
+                                    if not live_games:
+                                        response_text = "Nenhum jogo das principais ligas acontecendo no momento."
+                                    else:
+                                        USER_STATE[from_number] = {'step': 'awaiting_live_game_choice', 'live_games': live_games}
+                                        lines = ["*Jogos Acontecendo Agora (Principais Ligas):*\n"]
+                                        for i, game in enumerate(live_games[:20], start=1):
+                                            lines.append(f"{i}. {game['teams']['home']['name']} x {game['teams']['away']['name']}")
+                                        lines.append("\nDigite o número do jogo para receber a análise ao vivo.")
+                                        response_text = "\n".join(lines)
+                                else:
+                                    response_text = f"{get_greeting()}! Bem-vindo(a) ao Betting IA.\n\nEscolha uma opção:\n1. Jogos Pré-Live\n2. Jogos Ao Vivo"
+                                    USER_STATE[from_number]['step'] = 'awaiting_menu_choice'
+                            
+                            if response_text:
+                                send_whatsapp_message(from_number, response_text)
+        except Exception:
+            traceback.print_exc()
+        return "OK", 200
 
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 8000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    return "Not Found", 404
