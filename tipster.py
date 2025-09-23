@@ -60,14 +60,11 @@ def api_get_raw(path: str, params: dict = None, timeout: int = 25) -> Optional[D
         return None
 
 # =========================
-# SPORTS BETTING ANALYZER (pré-live) — preserva lógica e heurísticas
-# (baseado no sports_betting_analyzer.py que você me enviou). 
-# Principais funções: normalize_game, get_fixtures_for_dates, fetch_football_statistics,
-# build_stats_map, heuristics_football, enhance_predictions_with_preferred_odds, analyze
+# SPORTS BETTING ANALYZER (pré-live)
 # =========================
 
 PREFERRED_BOOKMAKERS = ["bet365", "betano", "superbet", "pinnacle"]
-# helpers numéricos
+
 def safe_int(v):
     try: return int(v)
     except (ValueError, TypeError):
@@ -95,14 +92,14 @@ def normalize_game(raw: dict) -> dict:
         "raw": raw
     }
 
-def get_fixtures_for_dates(days_forward: int = 2) -> List[dict]:
+def get_fixtures_for_dates(days_forward: int = 0) -> List[dict]:
     """
     Retorna fixtures cobrindo hoje + days_forward dias e jogos ao vivo.
     Mantém cache para economizar chamadas.
     """
     ck = f"all_fixtures_v4_{days_forward}"
     cached = _cache_get(ck)
-    if cached: 
+    if cached:
         return cached
 
     dates = [(datetime.utcnow().date() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days_forward + 1)]
@@ -135,11 +132,11 @@ def fetch_football_statistics(fixture_id: int) -> Optional[Dict[str, Any]]:
 
 def build_stats_map(stats_raw: Optional[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
     out: Dict[int, Dict[str, Any]] = {}
-    if not stats_raw or "response" not in stats_raw: 
+    if not stats_raw or "response" not in stats_raw:
         return out
     for item in stats_raw["response"]:
         tid = item.get("team", {}).get("id")
-        if not tid: 
+        if not tid:
             continue
         out[tid] = {}
         for s in item.get("statistics", []) or []:
@@ -149,10 +146,6 @@ def build_stats_map(stats_raw: Optional[Dict[str, Any]]) -> Dict[int, Dict[str, 
     return out
 
 def heuristics_football(fixture_raw: dict, stats_map: Dict[int, Dict[str, Any]]) -> Tuple[List[dict], dict]:
-    """
-    A heurística principal para recomendações pré-jogo.
-    Mantive a lógica de 'power' baseada em shots on goal (exemplo do seu código).
-    """
     teams = fixture_raw.get("teams", {})
     home = teams.get("home", {}); away = teams.get("away", {})
     home_stats = stats_map.get(home.get("id"), {}); away_stats = stats_map.get(away.get("id"), {})
@@ -167,23 +160,15 @@ def heuristics_football(fixture_raw: dict, stats_map: Dict[int, Dict[str, Any]])
     summary = {"home_power": round(h_power, 2), "away_power": round(a_power, 2)}
     return preds, summary
 
-# Odds/enhancement helper (simplificada mas funcional, preserva intenção original)
 def enhance_predictions_with_preferred_odds(predictions: List[Dict], odds_raw: Optional[Dict]) -> List[Dict]:
     if not odds_raw or not odds_raw.get("response"):
         return predictions
-    # procura melhor odd por mercado entre PREFERRED_BOOKMAKERS
-    # (implementação simplificada: anexa best_book se encontrado)
     for pred in predictions:
         pred["best_book"] = None
         pred["best_odd"] = None
-    # (manteria implementação completa do seu arquivo real; aqui mantive a intenção)
     return predictions
 
 def analyze(game_id: int):
-    """
-    Função de análise pré-jogo completa: pega fixture, estatísticas, heurísticas e odds.
-    Retorna dict com summary, predictions, top3, raw_fixture.
-    """
     fixture_data = api_get_raw("fixtures", params={"id": game_id})
     if not fixture_data or not fixture_data.get("response"):
         return None
@@ -201,16 +186,13 @@ def analyze(game_id: int):
         "raw_fixture": fixture
     }
 
-# backward-compatible alias (se algum código antigo usar analyze_game)
 def analyze_game(game_id: int):
     return analyze(game_id)
 
-# análise a partir de dados ao vivo (usa radar output)
+# =========================
+# análise a partir de dados ao vivo (RadarIA)
+# =========================
 def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
-    """
-    Recebe os dados do RadarIA e gera dicas de aposta baseadas nas estatísticas ao vivo.
-    Mantive a lógica que você tinha (shots, corners, elapsed, etc).
-    """
     if not radar_data:
         return []
 
@@ -266,10 +248,8 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     return tips
 
 # =========================
-# RADAR IA (ao vivo) — preservei sua implementação de stats_aovivo
-# (baseado em radar_ia.py; inclui cache e formatação de eventos)
+# RADAR IA (ao vivo) — funções consolidadas
 # =========================
-
 RADAR_CACHE_TTL = int(os.environ.get("RADAR_CACHE_TTL", "8"))
 _radar_cache: Dict[str, Dict[str, Any]] = {}
 
@@ -336,10 +316,6 @@ def try_int(v):
         return 0
 
 def stats_aovivo(game_id: int):
-    """
-    Versão consolidada do radar_ia.stats_aovivo — retorna fixture, teams, score, status,
-    statistics (home/away), events (processados), etc. Usa cache curto.
-    """
     ck = f"radar_stats_{game_id}_full"
     cached = _radar_cache_get(ck)
     if cached is not None:
@@ -396,7 +372,7 @@ def stats_aovivo(game_id: int):
         return None
 
 # =========================
-# OPTA IA (análise de jogador) — baseado em opta_ia.py
+# OPTA IA (análise de jogador)
 # =========================
 def get_players_for_team(team_id: int, season: int = datetime.now().year) -> Optional[List[Dict]]:
     if not API_SPORTS_KEY:
@@ -482,12 +458,11 @@ def analyze_player(player_id: int, season: int = datetime.now().year) -> Optiona
         print(f"ERRO interno ao analisar jogador {player_id}: {e}")
         return None
 
-# backward-compatible name
 def analyze_player_stats(player_id: int, season: int = datetime.now().year):
     return analyze_player(player_id, season)
 
 # =========================
-# FORMATAÇÃO (do app.py original — mantive as functions de formatação)
+# FORMATAÇÃO das saídas textuais
 # =========================
 def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -> str:
     if not game_analysis or 'raw_fixture' not in game_analysis:
@@ -496,15 +471,15 @@ def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -
     home_team = fixture.get('teams', {}).get('home', {}).get('name', 'Casa')
     away_team = fixture.get('teams', {}).get('away', {}).get('name', 'Visitante')
     top3 = game_analysis.get('top3', [])
-    lines = [f"Análise Completa: *{home_team} vs {away_team}*"]
-    lines.append("\n*🤖 Análise da Partida (TipsterIA)*")
+    lines = [f"📊 *Análise Completa — {home_team} vs {away_team}*"]
+    lines.append("\n🤖 *TipsterIA — Análise da Partida*")
     if not top3:
         lines.append("_Nenhuma dica principal encontrada._")
     else:
         for pick in top3:
-            line = f"- *{pick.get('market')}*: {pick.get('recommendation', 'N/A')}"
+            line = f"- *{pick.get('market')}*: {pick.get('recommendation', 'N/A')} (conf: {pick.get('confidence')})"
             lines.append(line)
-    lines.append("\n*👤 Jogadores em Destaque (OptaIA)*")
+    lines.append("\n👤 *OptaIA — Jogadores em Destaque*")
     if not players_analysis:
         lines.append("_Nenhuma análise de jogador disponível._")
     else:
@@ -517,7 +492,7 @@ def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -
                     lines.append("  - Sem dicas de aposta específicas.")
                 else:
                     for rec in recs:
-                        lines.append(f"  - *{rec.get('market')}*: {rec.get('recommendation')}")
+                        lines.append(f"  - *{rec.get('market')}*: {rec.get('recommendation')} (conf: {rec.get('confidence'):.2f})")
     lines.append("\n_Lembre-se: analise por conta própria._")
     return "\n".join(lines)
 
@@ -532,19 +507,19 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
     score = radar_data.get('score', {}).get('fulltime', {})
     home_score = score.get('home', 0)
     away_score = score.get('away', 0)
-    lines = [f"Análise Ao Vivo: *{home_team} {home_score} x {away_score} {away_team}*"]
-    lines.append(f"\n*📡 RadarIA — Status*: {status.get('long')}")
-    lines.append(f"\n*📊 Estatísticas resumidas (ex):* Posse/HomeChutes")
+    lines = [f"⚡ *Análise Ao Vivo — {home_team} {home_score} x {away_score} {away_team}*"]
+    lines.append(f"\n📡 RadarIA — Status: {status.get('long')}")
+    lines.append(f"\n📊 Estatísticas resumo (ex): Poss/Chutes/Escanteios")
     if not live_tips:
         lines.append("\n_Sem dicas ao vivo no momento._")
     else:
-        lines.append("\n*💡 Dicas ao vivo:*")
+        lines.append("\n💡 *Dicas ao vivo:*")
         for tip in live_tips:
-            lines.append(f"- {tip.get('market')}: {tip.get('recommendation')} ({tip.get('confidence')})")
+            lines.append(f"- {tip.get('market')}: {tip.get('recommendation')} (conf: {tip.get('confidence')}) — {tip.get('reason')}")
     return "\n".join(lines)
 
 # =========================
-# FLASK API (endpoints — espelho da API-FOOTBALL + endpoints de análise)
+# FLASK API
 # =========================
 app = Flask(__name__)
 
@@ -552,48 +527,79 @@ app = Flask(__name__)
 def home():
     return jsonify({"status": "ok", "message": "Betting IA Tipster ativo 🚀"})
 
-# Proxy-like endpoints (API-FOOTBALL compatible)
+# fixtures (API-FOOTBALL style) — original
 @app.route("/fixtures", methods=["GET"])
 def fixtures_endpoint():
-    # suporta ?date=YYYY-MM-DD  (se não, retorna hoje)
     date_param = request.args.get("date")
     if date_param:
         raw = api_get_raw("fixtures", params={"date": date_param})
     else:
-        # se não passou date, retornamos fixtures para hoje
         today = datetime.utcnow().date().strftime("%Y-%m-%d")
         raw = api_get_raw("fixtures", params={"date": today})
     if not raw:
         return jsonify({"response": []}), 200
-    # retornamos response do API-Football para compatibilidade
-    resp = raw.get("response", [])
-    # também fornecemos versão simplificada de jogos (id+label) para index.js
-    games = []
-    for f in resp:
-        fd = f.get("fixture", {})
-        fid = fd.get("id")
-        teams = f.get("teams", {})
-        label = f"{teams.get('home',{}).get('name')} vs {teams.get('away',{}).get('name')}"
-        games.append({"game_id": fid, "label": label, "raw": f})
-    return jsonify(games), 200
+    return jsonify(raw), 200
 
+# fixtures live (original)
 @app.route("/fixtures/live", methods=["GET"])
-def fixtures_live_endpoint():
+def fixtures_live_raw():
     raw = api_get_raw("fixtures", params={"live": "all"})
     if not raw:
-        return jsonify([]), 200
-    resp = raw.get("response", [])
-    games = []
-    for f in resp:
-        fd = f.get("fixture", {})
-        fid = fd.get("id")
-        teams = f.get("teams", {})
-        label = f"{teams.get('home',{}).get('name')} vs {teams.get('away',{}).get('name')}"
-        games.append({"game_id": fid, "label": label, "raw": f})
-    return jsonify(games), 200
+        return jsonify({"response": []}), 200
+    return jsonify(raw), 200
 
-# Endpoints de análise (mantendo nomes legíveis)
+# -----------------
+# Compat endpoints tailored for index.js / bot
+# -----------------
+def _make_game_obj_from_fixture(f: dict) -> dict:
+    fd = f.get("fixture", {}) or {}
+    fid = fd.get("id")
+    league = f.get("league", {}) or {}
+    teams = f.get("teams", {}) or {}
+    label = f"{teams.get('home',{}).get('name')} vs {teams.get('away',{}).get('name')}"
+    return {
+        "game_id": fid,
+        "label": label,
+        "league": {
+            "id": league.get("id"),
+            "country": league.get("country"),
+            "name": league.get("name")
+        },
+        "raw": f
+    }
+
+@app.route("/pre-live-games", methods=["GET"])
+def pre_live_games_compat():
+    """
+    Retorna lista de jogos pré-live (hoje) com campo 'league' (country + name).
+    Ideal para o index.js agrupar por país/ligas.
+    """
+    fixtures = get_fixtures_for_dates(days_forward=0)
+    out = []
+    for f in fixtures:
+        # only include scheduled (not live) when listing pre-live
+        if f.get("type") == "scheduled":
+            raw = f.get("raw") or {}
+            out.append(_make_game_obj_from_fixture(raw))
+    return jsonify(out), 200
+
+@app.route("/live-games", methods=["GET"])
+def live_games_compat():
+    """
+    Lista de jogos ao vivo simplificada (game_id, label, league).
+    """
+    raw = api_get_raw("fixtures", params={"live": "all"})
+    out = []
+    if raw and raw.get("response"):
+        for f in raw["response"]:
+            out.append(_make_game_obj_from_fixture(f))
+    return jsonify(out), 200
+
+# -----------------
+# analyze endpoints (compat both styles)
+# -----------------
 @app.route("/analyze/game", methods=["POST"])
+@app.route("/analyze-game", methods=["POST"])
 def api_analyze_game():
     try:
         data = request.get_json() or {}
@@ -601,14 +607,12 @@ def api_analyze_game():
         if not game_id:
             return jsonify({"error": "game_id é obrigatório"}), 400
         game_analysis = analyze(int(game_id))
-        # tenta buscar jogadores importantes via Opta (ex: top 1-2 por time) — usa get_players_for_team se quiser
         players_analysis = []
         try:
             if game_analysis and game_analysis.get("raw_fixture"):
                 fixture = game_analysis["raw_fixture"]
                 home_id = fixture.get("teams", {}).get("home", {}).get("id")
                 away_id = fixture.get("teams", {}).get("away", {}).get("id")
-                # tenta analisar 1 jogador por time (se houver)
                 if home_id:
                     players = get_players_for_team(home_id) or []
                     if players:
@@ -633,6 +637,7 @@ def api_analyze_game():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/analyze/live", methods=["POST"])
+@app.route("/analyze-live-game", methods=["POST"])
 def api_analyze_live():
     try:
         data = request.get_json() or {}
@@ -646,9 +651,9 @@ def api_analyze_live():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Player stats (Opta-style)
+# Opta endpoints
 @app.route("/players", methods=["GET"])
-def api_players():
+def api_players_old():
     try:
         player_id = request.args.get("id") or request.args.get("player_id")
         season = request.args.get("season") or datetime.now().year
@@ -661,18 +666,28 @@ def api_players():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# rota compatibilidade antiga (se algum script chamar get_pre_live_games)
-@app.route("/pre-live-games", methods=["GET"])
-def pre_live_games_compat():
-    fixtures = get_fixtures_for_dates(days_forward=0)
-    out = [{"game_id": f.get("game_id"), "label": f.get("teams", {}).get("home", {}).get("name", "") + " vs " + f.get("teams", {}).get("away", {}).get("name", "")} for f in fixtures]
-    return jsonify(out), 200
+@app.route("/opta-player", methods=["POST"])
+def api_opta_player_post():
+    try:
+        data = request.get_json() or {}
+        player_id = data.get("player_id")
+        season = data.get("season") or datetime.now().year
+        if not player_id:
+            return jsonify({"error": "player_id é obrigatório"}), 400
+        analysis = analyze_player(int(player_id), int(season))
+        if analysis is None:
+            return jsonify({"error": "Nenhum dado encontrado"}), 404
+        return jsonify({"opta": analysis}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Rota legacy /pre-live-games também já implementada acima
+# -----------------
 
 # =========================
 # RUN
 # =========================
 if __name__ == "__main__":
-    # Porta por env (Render) ou 5000 local
     port = int(os.environ.get("PORT", 5000))
     print(f"Tipster API rodando na porta {port}")
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)
