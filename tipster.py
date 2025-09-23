@@ -814,15 +814,17 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
     status = radar_data.get("status", {})
     home_team = teams.get("home", {}).get("name")
     away_team = teams.get("away", {}).get("name")
-    score = radar_data.get("score", {}) or {}
-home_score = score.get("home") or 0
-away_score = score.get("away") or 0
 
-# fallback se ainda vier zerado
-if home_score == 0 and away_score == 0:
-    fixture_score = radar_data.get("fixture", {}).get("score", {})
-    home_score = fixture_score.get("home", home_score)
-    away_score = fixture_score.get("away", away_score)
+    # ✅ placar atualizado (sem depender só de fulltime)
+    score = radar_data.get("score", {}) or {}
+    home_score = score.get("home") or 0
+    away_score = score.get("away") or 0
+
+    # fallback se ainda vier zerado
+    if home_score == 0 and away_score == 0:
+        fixture_score = radar_data.get("fixture", {}).get("score", {})
+        home_score = fixture_score.get("home", home_score)
+        away_score = fixture_score.get("away", away_score)
 
     lines = [
         f"⚡ *Análise Ao Vivo — {home_team} {home_score} x {away_score} {away_team}*"
@@ -854,30 +856,29 @@ if home_score == 0 and away_score == 0:
         extra_est = estimate_extra_time(radar_data.get("events", []))
         lines.append(f"⏱️ Estimativa de Acréscimo: {extra_est} minutos")
 
+    # ✅ helper para normalizar estatísticas
+    def get_stat(side_stats, *keys):
+        for k in keys:
+            if k in side_stats:
+                return side_stats.get(k) or 0
+        return 0
+
     # ✅ Estatísticas do Radar
     stats = radar_data.get("statistics", {})
     if stats:
-        lines.append("\n📊 Estatísticas principais:")
-        lines.append(
-            f"- Remates: {stats['home'].get('total_shots',0)} x {stats['away'].get('total_shots',0)}"
-        )
-        lines.append(
-            f"- Remates no Gol: {stats['home'].get('shots_on_target', stats['home'].get('shots_on', 0))} x "
-            f"{stats['away'].get('shots_on_target', stats['away'].get('shots_on', 0))}"
+        home_stats = stats.get("home", {})
+        away_stats = stats.get("away", {})
 
-        )
-        lines.append(
-            f"- Escanteios: {stats['home'].get('corners',0)} x {stats['away'].get('corners',0)}"
-        )
-        lines.append(
-            f"- Cartões Amarelos: {stats['home'].get('yellow_cards',0)} x {stats['away'].get('yellow_cards',0)}"
-        )
-        lines.append(
-            f"- Cartões Vermelhos: {stats['home'].get('red_cards',0)} x {stats['away'].get('red_cards',0)}"
-        )
-        lines.append(
-            f"- Posse de Bola: {stats['home'].get('ball_possession',0)}% x {stats['away'].get('ball_possession',0)}%"
-        )
+        lines.append("\n📊 Estatísticas principais:")
+        lines.append(f"- Remates: {get_stat(home_stats,'total_shots','shots_total','shots')} x "
+                     f"{get_stat(away_stats,'total_shots','shots_total','shots')}")
+        lines.append(f"- Remates no Gol: {get_stat(home_stats,'shots_on_target','shots_on','on_target','shots_on_goal')} x "
+                     f"{get_stat(away_stats,'shots_on_target','shots_on','on_target','shots_on_goal')}")
+        lines.append(f"- Escanteios: {get_stat(home_stats,'corner_kicks','corners','corner','corner_kicks_full')} x "
+                     f"{get_stat(away_stats,'corner_kicks','corners','corner','corner_kicks_full')}")
+        lines.append(f"- Cartões Amarelos: {get_stat(home_stats,'yellow_cards')} x {get_stat(away_stats,'yellow_cards')}")
+        lines.append(f"- Cartões Vermelhos: {get_stat(home_stats,'red_cards')} x {get_stat(away_stats,'red_cards')}")
+        lines.append(f"- Posse de Bola: {get_stat(home_stats,'ball_possession')}% x {get_stat(away_stats,'ball_possession')}%")
     else:
         lines.append("\n📊 Estatísticas não disponíveis no momento.")
 
