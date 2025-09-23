@@ -290,6 +290,13 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
             "confidence": confidence
         })
 
+    # 🔮 Estimativa de acréscimos
+    if 35 <= elapsed < 45:
+        add_tip("Estimativa de Acréscimo", "1º Tempo", "Provável acréscimo de 2 a 5 minutos", 0.60)
+    elif 80 <= elapsed < 90:
+        add_tip("Estimativa de Acréscimo", "2º Tempo", "Provável acréscimo de 3 a 7 minutos", 0.70)
+
+    # Sugestões baseadas em estatísticas
     if elapsed > 20:
         if total_shots > 7 and total_goals < 2:
             add_tip("Gols Asiáticos", f"Mais de {total_goals + 0.5}", f"{total_shots} remates totais", 0.70)
