@@ -1073,34 +1073,20 @@ def api_analyze_radar():
         game_id = data.get("game_id")
         if not game_id:
             return jsonify({"error": "game_id é obrigatório"}), 400
-        radar_data = stats_aovivo(int(game_id))
 
+        radar_data = stats_aovivo(int(game_id))
         if not radar_data:
             return jsonify({"analysis_text": "❌ Não foi possível obter dados do radar."}), 200
 
-        teams = radar_data.get("teams", {})
-        home = teams.get("home", {}).get("name", "Casa")
-        away = teams.get("away", {}).get("name", "Fora")
-        score = radar_data.get("score", {}).get("fulltime", {})
-        home_score = score.get("home") or 0
-        away_score = score.get("away") or 0
-
-        text = f"📡 *Radar — {home} {home_score} x {away_score} {away}*\n"
-        text += f"🟢 Status: {radar_data.get('status', {}).get('long','N/D')}\n"
-
-        stats = radar_data.get("statistics", {})
-        if stats:
-            text += f"\n📊 Remates: {stats['home'].get('total_shots',0)} x {stats['away'].get('total_shots',0)}"
-            text += f"\n📊 Escanteios: {stats['home'].get('corners',0)} x {stats['away'].get('corners',0)}"
-
-        if radar_data.get("events"):
-            text += "\n\n📌 Eventos recentes:"
-            for ev in radar_data["events"][:5]:
-                text += f"\n- {ev['display_time']} {ev['category']} ({ev.get('player') or ''})"
+        # 🔄 Reaproveita o mesmo formatador usado no live
+        live_tips = analyze_live_from_stats(radar_data or {})
+        text = format_live_analysis(radar_data, live_tips)
 
         return jsonify({"analysis_text": text}), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 # Opta endpoints
 @app.route("/players", methods=["GET"])
