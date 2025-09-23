@@ -1,4 +1,4 @@
-# app.py (VERSÃO FINAL E COMPLETA PARA META API)
+# app.py (VERSÃO COM LOGS DE DEPURAÇÃO)
 import os
 import traceback
 import requests
@@ -86,14 +86,32 @@ def get_greeting():
 
 def send_whatsapp_message(to_number, message_text):
     """Função para enviar mensagens usando a API da Meta."""
+    # <--- ADICIONADO PARA DEBUG
+    print("--- TENTANDO ENVIAR MENSAGEM ---")
+    print(f"PARA: {to_number}")
+    print(f"ID DO NÚMERO DE ORIGEM: {META_PHONE_NUMBER_ID}")
+    print(f"TOKEN USADO: {META_ACCESS_TOKEN[:5]}...{META_ACCESS_TOKEN[-5:] if META_ACCESS_TOKEN else 'NENHUM'}")
+    # --- FIM DO DEBUG ---
+
+    if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID:
+        print("--- ERRO FATAL: Variáveis de ambiente da Meta não configuradas! ---")
+        return
+
     url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {META_ACCESS_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to_number, "text": {"body": message_text}}
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=20)
         response.raise_for_status()
+        # <--- ADICIONADO PARA DEBUG
+        print(f"--- MENSAGEM ENVIADA COM SUCESSO! Resposta da Meta: {response.json()} ---")
+        # --- FIM DO DEBUG ---
     except requests.exceptions.RequestException as e:
-        print(f"Erro ao enviar mensagem: {e.response.text}")
+        # <--- MODIFICADO PARA DEBUG
+        print("--- ERRO CRÍTICO AO ENVIAR MENSAGEM PELA API DA META ---")
+        print(f"STATUS CODE: {e.response.status_code if e.response else 'N/A'}")
+        print(f"RESPOSTA DA META: {e.response.text if e.response else str(e)}")
+        # --- FIM DO DEBUG ---
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
@@ -122,6 +140,11 @@ def webhook():
                             if from_number not in USER_STATE:
                                 USER_STATE[from_number] = {'step': 'welcome'}
                             user_step = USER_STATE[from_number].get('step')
+                            
+                            # <--- ADICIONADO PARA DEBUG
+                            print(f"--- MENSAGEM RECEBIDA DE {from_number}: '{incoming_msg}' ---")
+                            print(f"--- ESTADO ATUAL DO USUÁRIO: {user_step} ---")
+                            # --- FIM DO DEBUG ---
 
                             if incoming_msg.isdigit():
                                 idx = int(incoming_msg) - 1
@@ -185,9 +208,16 @@ def webhook():
                                     USER_STATE[from_number]['step'] = 'awaiting_menu_choice'
                             
                             if from_number and response_text:
+                                # <--- ADICIONADO PARA DEBUG
+                                print(f"--- PREPARANDO PARA ENVIAR PARA {from_number}: '{response_text[:80].replace('\n', ' ')}...'")
+                                # --- FIM DO DEBUG ---
                                 send_whatsapp_message(from_number, response_text)
         except Exception:
+            # <--- ADICIONADO PARA DEBUG
+            print("--- ERRO INESPERADO NO WEBHOOK PRINCIPAL ---")
             traceback.print_exc()
+            print("---------------------------------------------")
+            # --- FIM DO DEBUG ---
         return "OK", 200
 
     return "Not Found", 404
