@@ -43,7 +43,6 @@ def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -
     lines = [f"Análise Completa: *{home_team} vs {away_team}*"]
     lines.append("\n*🤖 Análise da Partida (TipsterIA)*")
     for pick in top3:
-        market = pick.get('market_name_found', pick.get('market', '')).replace('_', ' ').title()
         line = f"- *{pick.get('market')}*: {pick.get('recommendation', 'N/A')}"
         lines.append(line)
     lines.append("\n*👤 Jogadores em Destaque (OptaIA)*")
@@ -91,7 +90,7 @@ def send_whatsapp_message(to_number, message_text):
     headers = {"Authorization": f"Bearer {META_ACCESS_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to_number, "text": {"body": message_text}}
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"Erro ao enviar mensagem: {e.response.text}")
@@ -107,14 +106,18 @@ def webhook():
     if request.method == "POST":
         try:
             data = request.get_json()
-            if data.get("object") == "whatsapp_business_account":
+            if data and data.get("object") == "whatsapp_business_account":
                 for entry in data.get("entry", []):
                     for change in entry.get("changes", []):
-                        if change.get("field") == "messages":
-                            message_data = change.get("value", {}).get("messages", [{}])[0]
+                        value = change.get("value", {})
+                        if value and "messages" in value:
+                            message_data = value.get("messages", [{}])[0]
                             from_number = message_data.get("from")
                             incoming_msg = message_data.get("text", {}).get("body", "").strip().lower()
                             response_text = ""
+
+                            if not from_number or not incoming_msg:
+                                continue
 
                             if from_number not in USER_STATE:
                                 USER_STATE[from_number] = {'step': 'welcome'}
@@ -155,33 +158,33 @@ def webhook():
                             else:
                                 if "pré" in incoming_msg or "pre" in incoming_msg or "1" == incoming_msg:
                                     all_games = sba.get_fixtures_for_dates(days_forward=0) if sba else []
-                                    pre_games = [g for g in all_games if g['league'].get('id') in PRINCIPAL_LEAGUE_IDS and g['type'] == 'scheduled']
+                                    pre_games = [g for g in all_games if g.get('league', {}).get('id') in PRINCIPAL_LEAGUE_IDS and g['type'] == 'scheduled']
                                     if not pre_games:
                                         response_text = "Nenhum jogo pré-live das principais ligas encontrado para hoje."
                                     else:
                                         USER_STATE[from_number] = {'step': 'awaiting_pre_game_choice', 'pre_games': pre_games}
                                         lines = ["*Jogos Pré-Live (Principais Ligas):*\n"]
                                         for i, game in enumerate(pre_games[:20], start=1):
-                                            lines.append(f"{i}. {game['teams']['home']['name']} x {game['teams']['away']['name']}")
+                                            lines.append(f"{i}. {game.get('teams', {}).get('home', {}).get('name', 'Time A')} x {game.get('teams', {}).get('away', {}).get('name', 'Time B')}")
                                         lines.append("\nDigite o número do jogo para receber a análise completa.")
                                         response_text = "\n".join(lines)
                                 elif "vivo" in incoming_msg or "2" == incoming_msg:
                                     all_games = sba.get_fixtures_for_dates(days_forward=0) if sba else []
-                                    live_games = [g for g in all_games if g['league'].get('id') in PRINCIPAL_LEAGUE_IDS and g['type'] == 'live']
+                                    live_games = [g for g in all_games if g.get('league', {}).get('id') in PRINCIPAL_LEAGUE_IDS and g['type'] == 'live']
                                     if not live_games:
                                         response_text = "Nenhum jogo das principais ligas acontecendo no momento."
                                     else:
                                         USER_STATE[from_number] = {'step': 'awaiting_live_game_choice', 'live_games': live_games}
                                         lines = ["*Jogos Acontecendo Agora (Principais Ligas):*\n"]
                                         for i, game in enumerate(live_games[:20], start=1):
-                                            lines.append(f"{i}. {game['teams']['home']['name']} x {game['teams']['away']['name']}")
+                                            lines.append(f"{i}. {game.get('teams', {}).get('home', {}).get('name', 'Time A')} x {game.get('teams', {}).get('away', {}).get('name', 'Time B')}")
                                         lines.append("\nDigite o número do jogo para receber a análise ao vivo.")
                                         response_text = "\n".join(lines)
                                 else:
                                     response_text = f"{get_greeting()}! Bem-vindo(a) ao Betting IA.\n\nEscolha uma opção:\n1. Jogos Pré-Live\n2. Jogos Ao Vivo"
                                     USER_STATE[from_number]['step'] = 'awaiting_menu_choice'
                             
-                            if response_text:
+                            if from_number and response_text:
                                 send_whatsapp_message(from_number, response_text)
         except Exception:
             traceback.print_exc()
