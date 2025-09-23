@@ -296,7 +296,7 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
             "confidence": confidence
         })
 
-        # =========================
+    # =========================
     # 🔮 Estimativa de acréscimos baseada em eventos
     # =========================
     def estimate_extra_time(events: list, half: int = 1) -> int:
@@ -398,7 +398,6 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
                     "Sugestão conservadora devido a pouca atividade", 0.40)
 
     return tips
-
 
 # =========================
 # RADAR IA (ao vivo) — funções consolidadas
