@@ -768,7 +768,6 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
 
     teams = radar_data.get("teams", {})
     status = radar_data.get("status", {})
-    home_stats = radar_data.get("statistics", {}).get("home", {})
     home_team = teams.get("home", {}).get("name")
     away_team = teams.get("away", {}).get("name")
     score = radar_data.get("score", {}).get("fulltime", {})
@@ -780,7 +779,32 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
     ]
     lines.append(f"\n📡 RadarIA — Status: {status.get('long')}")
 
-    lines.append(f"\n📊 Estatísticas resumo (ex): Remates / Poss / Escanteios")
+    # ✅ Estatísticas do Radar
+    stats = radar_data.get("statistics", {})
+    if stats:
+        lines.append("\n📊 Estatísticas principais:")
+        lines.append(
+            f"- Remates: {stats['home'].get('total_shots',0)} x {stats['away'].get('total_shots',0)}"
+        )
+        lines.append(
+            f"- Remates no Gol: {stats['home'].get('shots_on_target',0)} x {stats['away'].get('shots_on_target',0)}"
+        )
+        lines.append(
+            f"- Escanteios: {stats['home'].get('corners',0)} x {stats['away'].get('corners',0)}"
+        )
+        lines.append(
+            f"- Cartões Amarelos: {stats['home'].get('yellow_cards',0)} x {stats['away'].get('yellow_cards',0)}"
+        )
+        lines.append(
+            f"- Cartões Vermelhos: {stats['home'].get('red_cards',0)} x {stats['away'].get('red_cards',0)}"
+        )
+        lines.append(
+            f"- Posse de Bola: {stats['home'].get('ball_possession',0)}% x {stats['away'].get('ball_possession',0)}%"
+        )
+    else:
+        lines.append("\n📊 Estatísticas não disponíveis no momento.")
+
+    # ✅ Dicas ao vivo
     if not live_tips:
         lines.append("\n_Sem dicas ao vivo no momento._")
     else:
@@ -790,9 +814,24 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
             lines.append(
                 f"- {tip.get('market')}: {tip.get('recommendation')} (conf: {conf_txt}) — {tip.get('reason')}"
             )
-    lines.append(
-        "\n_Lembre-se: apostas ao vivo são voláteis — jogue com responsabilidade._"
-    )
+
+    # ✅ Eventos recentes
+    events = radar_data.get("events", [])
+    if events:
+        lines.append("\n📌 Eventos recentes:")
+        for ev in events[:5]:
+            lines.append(f"- {ev['display_time']} {ev['category']} ({ev.get('player') or ''})")
+
+    # ✅ Tempo com acréscimo
+    elapsed = status.get("elapsed")
+    extra = status.get("extra")
+    if elapsed:
+        if extra:
+            lines.append(f"\n⏱️ Tempo: {elapsed}+{extra}'")
+        else:
+            lines.append(f"\n⏱️ Tempo: {elapsed}'")
+
+    lines.append("\n_Lembre-se: apostas ao vivo são voláteis — jogue com responsabilidade._")
     return "\n".join(lines)
 
 # =========================
