@@ -691,7 +691,7 @@ def format_player_analysis(player_analysis: dict) -> str:
     key_stats = player_analysis.get("key_stats", {})
     if key_stats:
         lines.append("\n📊 *Estatísticas principais*:")
-        for k,v in key_stats.items():
+        for k, v in key_stats.items():
             lines.append(f"- {k}: {v}")
 
     recs = player_analysis.get("recommendations", [])
@@ -699,80 +699,100 @@ def format_player_analysis(player_analysis: dict) -> str:
         lines.append("\n💡 *Recomendações:*")
         for r in recs:
             conf_txt = format_conf_pct(r.get("confidence"))
-            lines.append(f"- {r['market']}: {r['recommendation']} (conf: {conf_txt}) — {r['reason']}")
+            lines.append(
+                f"- {r['market']}: {r['recommendation']} (conf: {conf_txt}) — {r['reason']}"
+            )
     else:
         lines.append("\n_Sem recomendações disponíveis._")
 
     return "\n".join(lines)
 
-    fixture = game_analysis.get('raw_fixture', {})
-    home_team = fixture.get('teams', {}).get('home', {}).get('name', 'Casa')
-    away_team = fixture.get('teams', {}).get('away', {}).get('name', 'Visitante')
-    top3 = game_analysis.get('top3', [])
+
+def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -> str:
+    if not game_analysis or "raw_fixture" not in game_analysis:
+        return "Não foi possível obter a análise para este jogo."
+
+    fixture = game_analysis.get("raw_fixture", {})
+    home_team = fixture.get("teams", {}).get("home", {}).get("name", "Casa")
+    away_team = fixture.get("teams", {}).get("away", {}).get("name", "Visitante")
+    top3 = game_analysis.get("top3", [])
+
     lines = [f"📊 *Análise Completa — {home_team} vs {away_team}*"]
     lines.append("\n🤖 *TipsterIA — Análise da Partida*")
+
     if not top3:
         lines.append("_Nenhuma dica principal encontrada._")
     else:
         for pick in top3:
-            conf_txt = format_conf_pct(pick.get('confidence'))
+            conf_txt = format_conf_pct(pick.get("confidence"))
             line = f"- *{pick.get('market')}*: {pick.get('recommendation', 'N/A')} (conf: {conf_txt})"
             if pick.get("reason"):
                 line += f" — {pick.get('reason')}"
-            # if odds/book present, include
             if pick.get("best_book"):
                 line += f" [{pick.get('best_book')} {pick.get('best_odd')}]"
             lines.append(line)
+
     lines.append("\n👤 *OptaIA — Jogadores em Destaque*")
     if not players_analysis:
         lines.append("_Nenhuma análise de jogador disponível._")
     else:
         for player_result in players_analysis:
-            if player_result and player_result.get('player_info'):
-                p_info = player_result['player_info']
-                recs = player_result.get('recommendations', [])
-                key_stats = player_result.get('key_stats', {})
+            if player_result and player_result.get("player_info"):
+                p_info = player_result["player_info"]
+                recs = player_result.get("recommendations", [])
+                key_stats = player_result.get("key_stats", {})
                 lines.append(f"\n*{p_info.get('name')}* ({p_info.get('team')})")
-                # mostrar key stats resumidas
                 if key_stats:
-                    ks_line = "  • " + " | ".join([f"{k}: {v}" for k, v in key_stats.items() if v is not None])
+                    ks_line = "  • " + " | ".join(
+                        [f"{k}: {v}" for k, v in key_stats.items() if v is not None]
+                    )
                     lines.append(ks_line)
                 if not recs:
                     lines.append("  - Sem dicas de aposta específicas.")
                 else:
                     for rec in recs:
-                        conf_txt = format_conf_pct(rec.get('confidence'))
-                        lines.append(f"  - *{rec.get('market')}*: {rec.get('recommendation')} (conf: {conf_txt}) — {rec.get('reason','')}")
-    lines.append("\n_Lembre-se: analise por conta própria — estas são sugestões automáticas._")
+                        conf_txt = format_conf_pct(rec.get("confidence"))
+                        lines.append(
+                            f"  - *{rec.get('market')}*: {rec.get('recommendation')} (conf: {conf_txt}) — {rec.get('reason','')}"
+                        )
+
+    lines.append(
+        "\n_Lembre-se: analise por conta própria — estas são sugestões automáticas._"
+    )
     return "\n".join(lines)
 
+
 def format_live_analysis(radar_data: dict, live_tips: list) -> str:
-    if not radar_data or 'fixture' not in radar_data:
+    if not radar_data or "fixture" not in radar_data:
         return "Não foi possível obter os dados ao vivo para este jogo."
-    teams = radar_data.get('teams', {})
-    status = radar_data.get('status', {})
-    home_stats = radar_data.get('statistics', {}).get('home', {})
-    home_team = teams.get('home', {}).get('name')
-    away_team = teams.get('away', {}).get('name')
-    score = radar_data.get('score', {}).get('fulltime', {})
-    home_score = score.get('home', 0)
-    away_score = score.get('away', 0)
-    lines = [f"⚡ *Análise Ao Vivo — {home_team} {home_score} x {away_score} {away_team}*"]
+
+    teams = radar_data.get("teams", {})
+    status = radar_data.get("status", {})
+    home_stats = radar_data.get("statistics", {}).get("home", {})
+    home_team = teams.get("home", {}).get("name")
+    away_team = teams.get("away", {}).get("name")
+    score = radar_data.get("score", {}).get("fulltime", {})
+    home_score = score.get("home") or 0
+    away_score = score.get("away") or 0
+
+    lines = [
+        f"⚡ *Análise Ao Vivo — {home_team} {home_score} x {away_score} {away_team}*"
+    ]
     lines.append(f"\n📡 RadarIA — Status: {status.get('long')}")
-    # resumo estatístico rápido (se disponível)
-    try:
-        poss_home = radar_data.get('fixture', {}).get('status', {}).get('elapsed')
-    except Exception:
-        poss_home = None
+
     lines.append(f"\n📊 Estatísticas resumo (ex): Remates / Poss / Escanteios")
     if not live_tips:
         lines.append("\n_Sem dicas ao vivo no momento._")
     else:
         lines.append("\n💡 *Dicas ao vivo:*")
         for tip in live_tips:
-            conf_txt = format_conf_pct(tip.get('confidence'))
-            lines.append(f"- {tip.get('market')}: {tip.get('recommendation')} (conf: {conf_txt}) — {tip.get('reason')}")
-    lines.append("\n_Lembre-se: apostas ao vivo são voláteis — jogue com responsabilidade._")
+            conf_txt = format_conf_pct(tip.get("confidence"))
+            lines.append(
+                f"- {tip.get('market')}: {tip.get('recommendation')} (conf: {conf_txt}) — {tip.get('reason')}"
+            )
+    lines.append(
+        "\n_Lembre-se: apostas ao vivo são voláteis — jogue com responsabilidade._"
+    )
     return "\n".join(lines)
 
 # =========================
@@ -1054,8 +1074,10 @@ def api_players_old():
         analysis = analyze_player(int(player_id), int(season))
         if analysis is None:
             return jsonify({"error": "Nenhum dado encontrado"}), 404
-       analysis_text = format_player_analysis(analysis)
-        return jsonify({"opta": {**analysis, "analysis_text": analysis_text}}), 200
+        analysis_text = format_player_analysis(analysis)
+        return jsonify(
+            {"opta": {**analysis, "analysis_text": analysis_text}}
+        ), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1071,8 +1093,10 @@ def api_opta_player_post():
         analysis = analyze_player(int(player_id), int(season))
         if analysis is None:
             return jsonify({"error": "Nenhum dado encontrado"}), 404
-        analysis_text = format_full_pre_game_analysis({}, [analysis])
-        return jsonify({"opta": {**analysis, "analysis_text": analysis_text}}), 200
+        analysis_text = format_player_analysis(analysis)
+        return jsonify(
+            {"opta": {**analysis, "analysis_text": analysis_text}}
+        ), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
