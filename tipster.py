@@ -146,29 +146,71 @@ def build_stats_map(stats_raw: Optional[Dict[str, Any]]) -> Dict[int, Dict[str, 
     return out
 
 def heuristics_football(fixture_raw: dict, stats_map: Dict[int, Dict[str, Any]]) -> Tuple[List[dict], dict]:
+    """
+    Heurísticas simples: calcula 'power' por shots on goal e usa isso para sugerir moneyline.
+    Se poucas previsões, preenche com picks genéricos de baixa confiança para garantir top3.
+    """
     teams = fixture_raw.get("teams", {})
     home = teams.get("home", {}); away = teams.get("away", {})
     home_stats = stats_map.get(home.get("id"), {}); away_stats = stats_map.get(away.get("id"), {})
     def g(d, k): return d.get(k, 0)
     h_sot = g(home_stats, "Shots on Goal"); a_sot = g(away_stats, "Shots on Goal")
+    # fallback: use shots_total if Shots on Goal not available
+    if h_sot == 0:
+        h_sot = g(home_stats, "Total shots") or g(home_stats, "Shots total") or g(home_stats, "Total shots on target")
+    if a_sot == 0:
+        a_sot = g(away_stats, "Total shots") or g(away_stats, "Shots total") or g(away_stats, "Total shots on target")
     h_power = h_sot * 1.6; a_power = a_sot * 1.6
     power_diff = h_power - a_power
     preds: List[dict] = []
-    def add(market, rec, conf): preds.append({"market": market, "recommendation": rec, "confidence": conf})
-    if power_diff > 4: add("moneyline", "Vitória Casa", 0.8)
-    elif power_diff < -4: add("moneyline", "Vitória Visitante", 0.8)
+    def add(market, rec, conf, reason=None): preds.append({"market": market, "recommendation": rec, "confidence": conf, "reason": reason or ""})
+    # primary picks
+    if power_diff > 4:
+        add("moneyline", "Vitória Casa", 0.8, f"Power diff {round(power_diff,2)}")
+    elif power_diff < -4:
+        add("moneyline", "Vitória Visitante", 0.8, f"Power diff {round(power_diff,2)}")
+    # additional heuristics
+    # if many shots but few goals -> suggest Over 1.5
+    total_shots = (h_sot or 0) + (a_sot or 0)
+    if total_shots > 8:
+        add("Total de Gols", "Mais de 1.5", 0.6, f"{total_shots} chutes detectados")
+    # both teams attacking
+    if (h_sot or 0) > 2 and (a_sot or 0) > 2:
+        add("Ambas Marcam", "Sim", 0.6, f"Shots: {h_sot} vs {a_sot}")
     summary = {"home_power": round(h_power, 2), "away_power": round(a_power, 2)}
+
+    # Ensure at least 3 picks — fill with generic conservative picks if needed
+    if len(preds) < 3:
+        # pick 1: Over 1.5 or Under 2.5 depending on total_shots
+        if total_shots >= 6:
+            add("Total de Gols", "Mais de 1.5", 0.45, "Fallback por atividade ofensiva")
+        else:
+            add("Total de Gols", "Menos de 2.5", 0.45, "Fallback por baixa atividade")
+        # pick 2: Both Teams to Score conservative
+        add("Ambas Marcam", "Sim", 0.40, "Fallback genérico")
+    # If still <3, pad with neutral market
+    while len(preds) < 3:
+        add("Resultado Final", "Sem favorito definido", 0.30, "Fallback neutro")
+
     return preds, summary
 
 def enhance_predictions_with_preferred_odds(predictions: List[Dict], odds_raw: Optional[Dict]) -> List[Dict]:
+    """
+    Tenta mapear melhor odd / bookmaker preferido. Se não encontrar, deixa None.
+    (Mantido simples — pois API de odds costuma variar por book).
+    """
     if not odds_raw or not odds_raw.get("response"):
         return predictions
+    # Simplistic: just attach placeholders if not present
     for pred in predictions:
-        pred["best_book"] = None
-        pred["best_odd"] = None
+        pred.setdefault("best_book", None)
+        pred.setdefault("best_odd", None)
     return predictions
 
 def analyze(game_id: int):
+    """
+    Análise pré-live principal. Sempre retorna um objeto com 'top3' com ao menos 3 sugestões.
+    """
     fixture_data = api_get_raw("fixtures", params={"id": game_id})
     if not fixture_data or not fixture_data.get("response"):
         return None
@@ -178,11 +220,17 @@ def analyze(game_id: int):
     preds, summary = heuristics_football(fixture, stats_map)
     odds_raw = api_get_raw("odds", params={"fixture": game_id})
     enhanced = enhance_predictions_with_preferred_odds(preds, odds_raw)
+    # ensure top3 exists
+    top3 = enhanced[:3]
+    if len(top3) < 3:
+        # pad with neutral picks if necessary
+        while len(top3) < 3:
+            top3.append({"market": "Resultado Final", "recommendation": "Sem favorito definido", "confidence": 0.30})
     return {
         "game_id": game_id,
         "summary": summary,
         "predictions": enhanced,
-        "top3": enhanced[:3],
+        "top3": top3,
         "raw_fixture": fixture
     }
 
@@ -201,7 +249,7 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     home_stats = stats.get("home", {})
     away_stats = stats.get("away", {})
     status = radar_data.get("status", {})
-    score = radar_data.get("score", {}).get("fulltime", {})
+    score = radar_data.get("score", {}).get('fulltime', {}) or {}
 
     elapsed = status.get("elapsed", 0)
     home_goals = score.get("home", 0)
@@ -244,6 +292,13 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
             add_tip("Total de Gols", "Menos de 1.5", "Poucos gols e pouco tempo restante", 0.85)
         elif home_goals > away_goals:
             add_tip("Resultado Final", "Vitória do Time da Casa", "Time da casa segurando o resultado", 0.70)
+
+    # fallback: if no tips, provide a conservative suggestion based on elapsed/shots
+    if not tips:
+        if total_shots >= 6:
+            add_tip("Total de Gols", "Mais de 1.5", "Fallback por atividade", 0.45)
+        else:
+            add_tip("Total de Gols", "Menos de 2.5", "Fallback conservador", 0.40)
 
     return tips
 
@@ -393,13 +448,18 @@ def get_players_for_team(team_id: int, season: int = datetime.now().year) -> Opt
         return None
 
 def process_and_analyze_stats(player_data: Dict) -> Dict:
+    """
+    Processa estatísticas do jogador e gera recomendações.
+    Agora garante pelo menos uma recomendação (fallback) baseada nas médias.
+    """
     stats_list = player_data.get("statistics", []) or []
     aggregated = defaultdict(lambda: defaultdict(float))
     total_games = 0
 
     for entry in stats_list:
         games_block = entry.get("games", {}) or {}
-        appearances = safe_int(games_block.get("appearences", 0))
+        # API pode usar 'appearances' ou 'appearences' (typo)
+        appearances = safe_int(games_block.get("appearences", 0) or games_block.get("appearances", 0) or games_block.get("played", 0))
         if appearances <= 0:
             continue
         total_games += appearances
@@ -412,7 +472,8 @@ def process_and_analyze_stats(player_data: Dict) -> Dict:
                         pass
 
     if total_games == 0:
-        return {"key_stats": {}, "recommendations": []}
+        # fallback: no data — return minimal structure with a conservative suggestion
+        return {"key_stats": {}, "recommendations": [{"market": "Jogador para Marcar", "recommendation": "Não", "confidence": 0.15, "reason": "Poucos dados disponíveis"}]}
 
     def get_stat(cat, key):
         return aggregated.get(cat, {}).get(key, 0.0)
@@ -420,15 +481,54 @@ def process_and_analyze_stats(player_data: Dict) -> Dict:
     key_stats = {
         "Gols (média/jogo)": f"{(get_stat('goals', 'total') / total_games):.2f}",
         "Chutes no Gol (m/jogo)": f"{(get_stat('shots', 'on') / total_games):.2f}",
+        "Assistências (m/jogo)": f"{(get_stat('goals', 'assists') / total_games) if get_stat('goals','assists') else 0.00:.2f}"
     }
     recommendations = []
     avg_goals = get_stat('goals', 'total') / total_games
+    shots_on = get_stat('shots', 'on') / total_games if total_games else 0.0
+
+    # Primary recommendation: marcar
     if avg_goals > 0.35:
         recommendations.append({
             "market": "Jogador para Marcar",
             "recommendation": "Sim",
             "confidence": min(0.95, avg_goals / 0.7),
             "reason": f"Média de {avg_goals:.2f} gols por jogo."
+        })
+    else:
+        # if low goals but decent shots, recommend 'chutes no gol' market
+        if shots_on >= 0.6:
+            recommendations.append({
+                "market": "Chutes no Gol",
+                "recommendation": "Acima de 0.5",
+                "confidence": min(0.6, shots_on / 2),
+                "reason": f"Média de {shots_on:.2f} chutes no gol por jogo."
+            })
+        else:
+            # fallback conservative recommendation
+            recommendations.append({
+                "market": "Jogador para Marcar",
+                "recommendation": "Não",
+                "confidence": 0.18,
+                "reason": "Média de gols baixa."
+            })
+    # Add secondary recommendation based on passes or defensive actions if present
+    passes_per_game = get_stat('passes', 'total') / total_games if total_games else 0.0
+    if passes_per_game > 10:
+        recommendations.append({
+            "market": "Passes (m/jogo)",
+            "recommendation": f"Acima de {int(passes_per_game//5*5)}",
+            "confidence": 0.30,
+            "reason": f"Média de {passes_per_game:.2f} passes por jogo."
+        })
+
+    # Guarantee at least one recommendation (shouldn't be empty)
+    if not recommendations:
+        recommendations.append({
+            "market": "Jogador para Marcar",
+            "recommendation": "Não",
+            "confidence": 0.15,
+            "reason": "Fallback sem dados suficientemente fortes."
         })
     return {"key_stats": key_stats, "recommendations": recommendations}
 
@@ -450,6 +550,11 @@ def analyze_player(player_id: int, season: int = datetime.now().year) -> Optiona
             "team": (player_data.get('statistics', [{}])[0].get('team', {}) or {}).get('name'),
         }
         analysis_result = process_and_analyze_stats(player_data)
+        # ensure there is at least one recommendation
+        recs = analysis_result.get("recommendations") or []
+        if not recs:
+            recs = [{"market": "Jogador para Marcar", "recommendation": "Não", "confidence": 0.15, "reason": "Fallback"}]
+            analysis_result["recommendations"] = recs
         return {"player_info": player_info, **analysis_result}
     except requests.exceptions.RequestException as e:
         print(f"ERRO de API ao analisar jogador {player_id}: {e}")
@@ -477,7 +582,9 @@ def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -
         lines.append("_Nenhuma dica principal encontrada._")
     else:
         for pick in top3:
-            line = f"- *{pick.get('market')}*: {pick.get('recommendation', 'N/A')} (conf: {pick.get('confidence')})"
+            line = f"- *{pick.get('market')}*: {pick.get('recommendation', 'N/A')} (conf: {pick.get('confidence'):.2f})"
+            if pick.get("reason"):
+                line += f" — {pick.get('reason')}"
             lines.append(line)
     lines.append("\n👤 *OptaIA — Jogadores em Destaque*")
     if not players_analysis:
@@ -492,7 +599,7 @@ def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -
                     lines.append("  - Sem dicas de aposta específicas.")
                 else:
                     for rec in recs:
-                        lines.append(f"  - *{rec.get('market')}*: {rec.get('recommendation')} (conf: {rec.get('confidence'):.2f})")
+                        lines.append(f"  - *{rec.get('market')}*: {rec.get('recommendation')} (conf: {rec.get('confidence'):.2f}) — {rec.get('reason','')}")
     lines.append("\n_Lembre-se: analise por conta própria._")
     return "\n".join(lines)
 
@@ -515,7 +622,7 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
     else:
         lines.append("\n💡 *Dicas ao vivo:*")
         for tip in live_tips:
-            lines.append(f"- {tip.get('market')}: {tip.get('recommendation')} (conf: {tip.get('confidence')}) — {tip.get('reason')}")
+            lines.append(f"- {tip.get('market')}: {tip.get('recommendation')} (conf: {tip.get('confidence'):.2f}) — {tip.get('reason')}")
     return "\n".join(lines)
 
 # =========================
@@ -707,12 +814,19 @@ def api_analyze_game():
                 if home_id:
                     players = get_players_for_team(home_id) or []
                     if players:
+                        # try to analyze a couple of most likely scorers (first two players)
                         pid = players[0].get("id")
                         if pid:
                             p_analysis = analyze_player(pid)
                             if p_analysis:
                                 players_analysis.append(p_analysis)
-                if away_id:
+                        if len(players) > 1:
+                            pid2 = players[1].get("id")
+                            if pid2:
+                                p2_analysis = analyze_player(pid2)
+                                if p2_analysis:
+                                    players_analysis.append(p2_analysis)
+                if away_id and len(players_analysis) < 2:
                     players = get_players_for_team(away_id) or []
                     if players:
                         pid = players[0].get("id")
@@ -739,6 +853,20 @@ def api_analyze_live():
         live_tips = analyze_live_from_stats(radar_data or {})
         text = format_live_analysis(radar_data or {}, live_tips)
         return jsonify({"analysis_text": text, "raw": {"radar": radar_data, "tips": live_tips}}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# radar-only endpoint (for explicit radar menu)
+@app.route("/analyze/radar", methods=["POST"])
+def api_analyze_radar():
+    try:
+        data = request.get_json() or {}
+        game_id = data.get("game_id")
+        if not game_id:
+            return jsonify({"error": "game_id é obrigatório"}), 400
+        radar_data = stats_aovivo(int(game_id))
+        # return radar full data and a quick summary
+        return jsonify({"radar": radar_data}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -771,6 +899,78 @@ def api_opta_player_post():
         return jsonify({"opta": analysis}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# -----------------
+# Novos endpoints utilitários para o menu Opta / front-end
+# -----------------
+@app.route("/opta/leagues", methods=["GET"])
+def opta_leagues():
+    """
+    Retorna lista simples de ligas extraídas dos fixtures (para popular dropdown).
+    """
+    try:
+        # pegar fixtures próximos 2 dias (hoje, amanhã)
+        fixtures = get_fixtures_for_dates(days_forward=2)
+        leagues_map = {}
+        for f in fixtures:
+            raw = f.get("raw") or {}
+            league = raw.get("league", {}) or {}
+            lid = league.get("id")
+            if not lid:
+                continue
+            leagues_map[lid] = {"id": lid, "name": league.get("name"), "country": league.get("country")}
+        out = list(leagues_map.values())
+        return jsonify(out), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify([]), 200
+
+@app.route("/opta/teams", methods=["GET"])
+def opta_teams():
+    """
+    /opta/teams?league_id=123
+    Retorna times para a liga informada (baseado nos fixtures próximos dias).
+    """
+    try:
+        league_id = request.args.get("league_id")
+        if not league_id:
+            return jsonify({"error": "league_id obrigatório"}), 400
+        fixtures = get_fixtures_for_dates(days_forward=2)
+        teams_map = {}
+        for f in fixtures:
+            raw = f.get("raw") or {}
+            league = raw.get("league", {}) or {}
+            if str(league.get("id")) != str(league_id):
+                continue
+            teams = raw.get("teams", {}) or {}
+            home = teams.get("home", {}) or {}
+            away = teams.get("away", {}) or {}
+            if home.get("id"):
+                teams_map[home.get("id")] = {"id": home.get("id"), "name": home.get("name")}
+            if away.get("id"):
+                teams_map[away.get("id")] = {"id": away.get("id"), "name": away.get("name")}
+        out = list(teams_map.values())
+        return jsonify(out), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify([]), 200
+
+@app.route("/opta/players", methods=["GET"])
+def opta_players():
+    """
+    /opta/players?team_id=123
+    Retorna jogadores (id,name) para o time via API-FOOTBALL players endpoint.
+    """
+    try:
+        team_id = request.args.get("team_id")
+        season = request.args.get("season") or datetime.now().year
+        if not team_id:
+            return jsonify({"error": "team_id obrigatório"}), 400
+        players = get_players_for_team(int(team_id), int(season)) or []
+        return jsonify(players), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify([]), 200
 
 # Rota legacy /pre-live-games também já implementada acima
 # -----------------
