@@ -1,4 +1,14 @@
+# Web framework
 flask
-requests
 gunicorn
+
+# Utilidades
+requests
 python-dotenv
+
+# Se usar FastAPI em algum módulo
+fastapi
+uvicorn
+
+# Twilio (caso você habilite o webhook direto no Python)
+twilio
