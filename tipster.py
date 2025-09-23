@@ -482,9 +482,9 @@ def stats_aovivo(game_id: int):
             print(f"ERRO: Fixture {game_id} não encontrado em radar_ia.")
             return None
         fixture = fixture_resp["response"][0]
-
         home_id = fixture.get("teams", {}).get("home", {}).get("id")
 
+        # estatísticas
         stats_resp = safe_get(f"{base}/fixtures/statistics", headers, params={"fixture": game_id})
         full_stats = {"home": {}, "away": {}}
         if stats_resp and stats_resp.get("response"):
@@ -497,6 +497,7 @@ def stats_aovivo(game_id: int):
                     tmp[k] = try_int(s.get("value"))
                 full_stats[side].update(tmp)
 
+        # eventos
         events_resp = safe_get(f"{base}/fixtures/events", headers, params={"fixture": game_id})
         events = events_resp.get("response", []) if events_resp else []
         processed = []
