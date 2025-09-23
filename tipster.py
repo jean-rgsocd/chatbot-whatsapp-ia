@@ -1032,37 +1032,54 @@ def format_live_analysis(radar_data: Dict, tips: List[Dict]) -> str:
     lines.append(f"⏱️ Minuto: {status.get('elapsed', 0)}'")
     lines.append(f"🔢 Placar: {home} {home_goals} x {away_goals} {away}")
 
-    # estimativa de acréscimo (se tiver)
-    extra_est = radar_data.get("extra_time_est")
-    if extra_est:
-        lines.append(f"⏱️ Estimativa de Acréscimo {extra_est['half']}ºT: {extra_est['minutes']} min")
+    # estatísticas principais
+    home_stats = radar_data.get("statistics", {}).get("home", {})
+    away_stats = radar_data.get("statistics", {}).get("away", {})
 
-    # 📊 estatísticas principais
-    stats = radar_data.get("statistics", {})
-    home_stats = stats.get("home", {})
-    away_stats = stats.get("away", {})
-
-        lines.append("\n📊 Estatísticas principais:")
-    lines.append(f"Remates: {home_stats.get('total_shots', 0)} x {away_stats.get('total_shots', 0)}")
-
-    # cobre diferentes nomes que a API pode usar para remates no gol
     def get_stat_display(side_stats, *keys):
         for k in keys:
             if k in side_stats:
                 return side_stats.get(k) or 0
         return 0
 
+    lines.append("\n📊 Estatísticas principais:")
+    lines.append(
+        f"Remates: "
+        f"{get_stat_display(home_stats, 'total_shots','shots_total','shots')} x "
+        f"{get_stat_display(away_stats, 'total_shots','shots_total','shots')}"
+    )
     lines.append(
         f"Remates no Gol: "
         f"{get_stat_display(home_stats, 'shots_on_target','shots_on','on_target','shots_on_goal')} x "
         f"{get_stat_display(away_stats, 'shots_on_target','shots_on','on_target','shots_on_goal')}"
     )
+    lines.append(
+        f"Escanteios: "
+        f"{get_stat_display(home_stats, 'corner_kicks','corners','corner_kicks_full')} x "
+        f"{get_stat_display(away_stats, 'corner_kicks','corners','corner_kicks_full')}"
+    )
+    lines.append(
+        f"Cartões Amarelos: "
+        f"{get_stat_display(home_stats, 'yellow_cards','yellows','cards_yellow')} x "
+        f"{get_stat_display(away_stats, 'yellow_cards','yellows','cards_yellow')}"
+    )
+    lines.append(
+        f"Cartões Vermelhos: "
+        f"{get_stat_display(home_stats, 'red_cards','reds','cards_red')} x "
+        f"{get_stat_display(away_stats, 'red_cards','reds','cards_red')}"
+    )
+    lines.append(
+        f"Posse de Bola: "
+        f"{get_stat_display(home_stats, 'ball_possession','possession','possession_pct')}% x "
+        f"{get_stat_display(away_stats, 'ball_possession','possession','possession_pct')}%"
+    )
 
-    lines.append(f"Escanteios: {home_stats.get('corner_kicks', 0)} x {away_stats.get('corner_kicks', 0)}")
-    lines.append(f"Cartões Amarelos: {home_stats.get('yellow_cards', 0)} x {away_stats.get('yellow_cards', 0)}")
-    lines.append(f"Cartões Vermelhos: {home_stats.get('red_cards', 0)} x {away_stats.get('red_cards', 0)}")
-    lines.append(f"Posse de Bola: {home_stats.get('ball_possession', 0)}% x {away_stats.get('ball_possession', 0)}%")
+    # estimativa de acréscimo (se tiver)
+    extra_est = radar_data.get("extra_time_est")
+    if extra_est:
+        lines.append(f"\n⏱️ Estimativa de Acréscimo {extra_est['half']}ºT: {extra_est['minutes']} min")
 
+    # dicas de aposta
     lines.append("\n🎯 Dicas de Aposta:")
 
     # organizar por mercados
