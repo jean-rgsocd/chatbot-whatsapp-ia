@@ -263,8 +263,8 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     score = radar_data.get("score", {}).get('fulltime', {}) or {}
 
     elapsed = status.get("elapsed", 0)
-    home_goals = score.get("home", 0)
-    away_goals = score.get("away", 0)
+    home_goals = score.get("home") or 0
+    away_goals = score.get("away") or 0
     total_goals = home_goals + away_goals
 
     # normalize many possible keys (some APIs use different names)
@@ -681,9 +681,30 @@ def analyze_player_stats(player_id: int, season: int = datetime.now().year):
 # =========================
 # FORMATAÇÃO das saídas textuais (WhatsApp-friendly)
 # =========================
-def format_full_pre_game_analysis(game_analysis: dict, players_analysis: list) -> str:
-    if not game_analysis or 'raw_fixture' not in game_analysis:
-        return "Não foi possível obter a análise para este jogo."
+def format_player_analysis(player_analysis: dict) -> str:
+    if not player_analysis or not player_analysis.get("player_info"):
+        return "❌ Não foi possível obter análise para este jogador."
+
+    p_info = player_analysis["player_info"]
+    lines = [f"👤 *{p_info.get('name')}* ({p_info.get('team')})"]
+
+    key_stats = player_analysis.get("key_stats", {})
+    if key_stats:
+        lines.append("\n📊 *Estatísticas principais*:")
+        for k,v in key_stats.items():
+            lines.append(f"- {k}: {v}")
+
+    recs = player_analysis.get("recommendations", [])
+    if recs:
+        lines.append("\n💡 *Recomendações:*")
+        for r in recs:
+            conf_txt = format_conf_pct(r.get("confidence"))
+            lines.append(f"- {r['market']}: {r['recommendation']} (conf: {conf_txt}) — {r['reason']}")
+    else:
+        lines.append("\n_Sem recomendações disponíveis._")
+
+    return "\n".join(lines)
+
     fixture = game_analysis.get('raw_fixture', {})
     home_team = fixture.get('teams', {}).get('home', {}).get('name', 'Casa')
     away_team = fixture.get('teams', {}).get('away', {}).get('name', 'Visitante')
@@ -994,8 +1015,31 @@ def api_analyze_radar():
         if not game_id:
             return jsonify({"error": "game_id é obrigatório"}), 400
         radar_data = stats_aovivo(int(game_id))
-        # return radar full data and a quick summary
-        return jsonify({"radar": radar_data}), 200
+
+        if not radar_data:
+            return jsonify({"analysis_text": "❌ Não foi possível obter dados do radar."}), 200
+
+        teams = radar_data.get("teams", {})
+        home = teams.get("home", {}).get("name", "Casa")
+        away = teams.get("away", {}).get("name", "Fora")
+        score = radar_data.get("score", {}).get("fulltime", {})
+        home_score = score.get("home") or 0
+        away_score = score.get("away") or 0
+
+        text = f"📡 *Radar — {home} {home_score} x {away_score} {away}*\n"
+        text += f"🟢 Status: {radar_data.get('status', {}).get('long','N/D')}\n"
+
+        stats = radar_data.get("statistics", {})
+        if stats:
+            text += f"\n📊 Remates: {stats['home'].get('total_shots',0)} x {stats['away'].get('total_shots',0)}"
+            text += f"\n📊 Escanteios: {stats['home'].get('corners',0)} x {stats['away'].get('corners',0)}"
+
+        if radar_data.get("events"):
+            text += "\n\n📌 Eventos recentes:"
+            for ev in radar_data["events"][:5]:
+                text += f"\n- {ev['display_time']} {ev['category']} ({ev.get('player') or ''})"
+
+        return jsonify({"analysis_text": text}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1010,7 +1054,7 @@ def api_players_old():
         analysis = analyze_player(int(player_id), int(season))
         if analysis is None:
             return jsonify({"error": "Nenhum dado encontrado"}), 404
-        analysis_text = format_full_pre_game_analysis({}, [analysis])
+       analysis_text = format_player_analysis(analysis)
         return jsonify({"opta": {**analysis, "analysis_text": analysis_text}}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
