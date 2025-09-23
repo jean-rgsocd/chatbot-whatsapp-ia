@@ -296,7 +296,7 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
             "confidence": confidence
         })
 
-    # =========================
+        # =========================
     # 🔮 Estimativa de acréscimos baseada em eventos
     # =========================
     def estimate_extra_time(events: list, half: int = 1) -> int:
@@ -326,18 +326,18 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
                     total_seconds += 60
         return (total_seconds + 59) // 60
 
-    # calcula acréscimo estimado e adiciona como dica
+    # só armazena no radar_data, não vira dica de aposta
     if 35 <= elapsed < 45:
-        extra_est = estimate_extra_time(radar_data.get("events", []), half=1)
-        add_tip("Acréscimo 1º Tempo",
-                f"Estimado: {extra_est} minutos",
-                "Baseado nos eventos ocorridos no 1º tempo", 0.65)
+        radar_data["extra_time_est"] = {
+            "half": 1,
+            "minutes": estimate_extra_time(radar_data.get("events", []), half=1)
+        }
 
     if 80 <= elapsed < 90:
-        extra_est = estimate_extra_time(radar_data.get("events", []), half=2)
-        add_tip("Acréscimo 2º Tempo",
-                f"Estimado: {extra_est} minutos",
-                "Baseado nos eventos ocorridos no 2º tempo", 0.65)
+        radar_data["extra_time_est"] = {
+            "half": 2,
+            "minutes": estimate_extra_time(radar_data.get("events", []), half=2)
+        }
 
     # =========================
     # Sugestões baseadas em estatísticas
@@ -361,6 +361,14 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
         elif total_shots > 10 and total_corners < 4:
             add_tip("Escanteios (Equipe)", "Próximo escanteio para o time mais ofensivo",
                     "Alta pressão e poucos cantos até agora", 0.60)
+
+    # ⚡ Heurística de pressão ofensiva
+    if home_shots_total - away_shots_total >= 8 and home_shots_on >= 3:
+        add_tip("Resultado Final", "Vitória do Time da Casa",
+                f"Domínio ofensivo: {home_shots_total} x {away_shots_total} remates", 0.78)
+    elif away_shots_total - home_shots_total >= 8 and away_shots_on >= 3:
+        add_tip("Resultado Final", "Vitória do Time Visitante",
+                f"Domínio ofensivo: {away_shots_total} x {home_shots_total} remates", 0.78)
 
     if elapsed > 75:
         if total_goals == 0:
