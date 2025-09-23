@@ -267,7 +267,7 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     away_goals = score.get("away") or 0
     total_goals = home_goals + away_goals
 
-    # normalize many possible keys (some APIs use different names)
+    # normaliza stats (cada API usa chaves diferentes)
     def get_stat(side_stats, *keys):
         for k in keys:
             if k in side_stats:
@@ -290,40 +290,79 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
             "confidence": confidence
         })
 
-    # 🔮 Estimativa de acréscimos
-    if 35 <= elapsed < 45:
-        add_tip("Estimativa de Acréscimo", "1º Tempo", "Provável acréscimo de 1 a 10 minutos", 0.60)
-    elif 80 <= elapsed < 90:
-        add_tip("Estimativa de Acréscimo", "2º Tempo", "Provável acréscimo de 1 a 10 minutos", 0.70)
+    # =========================
+    # 🔮 Estimativa de acréscimos baseada em eventos
+    # =========================
+    def estimate_extra_time(events: List[Dict]) -> int:
+        total_seconds = 0
+        for ev in events:
+            cat = ev.get("category", "").lower()
 
+            if "falta" in cat:
+                total_seconds += 15
+            elif "amarelo" in cat:
+                total_seconds += 30
+            elif "gol" in cat:
+                total_seconds += 60
+            elif "var" in cat:
+                # Se tiver timestamps de início/fim, usa; senão assume 60s
+                start = ev.get("start_time")
+                end = ev.get("end_time")
+                if start and end:
+                    total_seconds += max(int(end - start), 60)
+                else:
+                    total_seconds += 60
+
+        return (total_seconds + 59) // 60  # arredonda pra cima em minutos
+
+    if 35 <= elapsed < 45 or 80 <= elapsed < 90:
+        extra_est = estimate_extra_time(radar_data.get("events", []))
+        if extra_est > 0:
+            add_tip("Estimativa de Acréscimo", f"{extra_est} minutos",
+                    "Baseado em eventos (faltas, gols, cartões, VAR)", 0.85)
+        else:
+            add_tip("Estimativa de Acréscimo", "0 minutos",
+                    "Jogo com poucas interrupções", 0.60)
+
+    # =========================
     # Sugestões baseadas em estatísticas
+    # =========================
     if elapsed > 20:
         if total_shots > 7 and total_goals < 2:
-            add_tip("Gols Asiáticos", f"Mais de {total_goals + 0.5}", f"{total_shots} remates totais", 0.70)
+            add_tip("Gols Asiáticos", f"Mais de {total_goals + 0.5}",
+                    f"{total_shots} remates totais", 0.70)
         elif total_shots < 3:
-            add_tip("Gols Asiáticos", f"Menos de {total_goals + 1.5}", f"Apenas {total_shots} remates", 0.65)
+            add_tip("Gols Asiáticos", f"Menos de {total_goals + 1.5}",
+                    f"Apenas {total_shots} remates", 0.65)
 
     if (home_shots or 0) > 3 and (away_shots or 0) > 3 and total_goals < 3:
-        add_tip("Ambas Marcam", "Sim", f"Ambas as equipas rematam ({home_shots} vs {away_shots})", 0.75)
+        add_tip("Ambas Marcam", "Sim",
+                f"Ambas as equipas rematam ({home_shots} vs {away_shots})", 0.75)
 
     if elapsed > 25:
         if total_corners > 5:
-            add_tip("Escanteios Asiáticos", f"Mais de {total_corners + 2}", f"{total_corners} escanteios já cobrados", 0.80)
+            add_tip("Escanteios Asiáticos", f"Mais de {total_corners + 2}",
+                    f"{total_corners} escanteios já cobrados", 0.80)
         elif total_shots > 10 and total_corners < 4:
-            add_tip("Escanteios (Equipe)", "Próximo escanteio para o time mais ofensivo", "Alta pressão e poucos cantos até agora", 0.60)
+            add_tip("Escanteios (Equipe)", "Próximo escanteio para o time mais ofensivo",
+                    "Alta pressão e poucos cantos até agora", 0.60)
 
     if elapsed > 75:
         if total_goals == 0:
-            add_tip("Total de Gols", "Menos de 1.5", "Poucos golos e pouco tempo restante", 0.85)
+            add_tip("Total de Gols", "Menos de 1.5",
+                    "Poucos golos e pouco tempo restante", 0.85)
         elif home_goals > away_goals:
-            add_tip("Resultado Final", "Vitória do Time da Casa", "Time da casa a segurar o resultado", 0.70)
+            add_tip("Resultado Final", "Vitória do Time da Casa",
+                    "Time da casa a segurar o resultado", 0.70)
 
-    # fallback: if no tips, provide a conservative suggestion based on elapsed/shots
+    # fallback se não gerar nenhuma dica
     if not tips:
         if total_shots >= 6:
-            add_tip("Total de Gols", "Mais de 1.5", "Sugestão baseada na atividade de remates", 0.45)
+            add_tip("Total de Gols", "Mais de 1.5",
+                    "Sugestão baseada na atividade de remates", 0.45)
         else:
-            add_tip("Total de Gols", "Menos de 2.5", "Sugestão conservadora devido a pouca atividade", 0.40)
+            add_tip("Total de Gols", "Menos de 2.5",
+                    "Sugestão conservadora devido a pouca atividade", 0.40)
 
     return tips
 
@@ -786,6 +825,31 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
     ]
     lines.append(f"\n📡 RadarIA — Status: {status.get('long')}")
 
+    # ✅ Estimativa de acréscimos (baseada em eventos)
+    def estimate_extra_time(events: list) -> int:
+        total_seconds = 0
+        for ev in events:
+            cat = ev.get("category", "").lower()
+            if "falta" in cat:
+                total_seconds += 15
+            elif "amarelo" in cat:
+                total_seconds += 30
+            elif "gol" in cat:
+                total_seconds += 60
+            elif "var" in cat:
+                start = ev.get("start_time")
+                end = ev.get("end_time")
+                if start and end:
+                    total_seconds += max(int(end - start), 60)
+                else:
+                    total_seconds += 60
+        return (total_seconds + 59) // 60
+
+    elapsed = status.get("elapsed", 0)
+    if 35 <= elapsed < 45 or 80 <= elapsed < 90:
+        extra_est = estimate_extra_time(radar_data.get("events", []))
+        lines.append(f"⏱️ Estimativa de Acréscimo: {extra_est} minutos")
+
     # ✅ Estatísticas do Radar
     stats = radar_data.get("statistics", {})
     if stats:
@@ -829,12 +893,11 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
         for ev in events[:5]:
             lines.append(f"- {ev['display_time']} {ev['category']} ({ev.get('player') or ''})")
 
-    # ✅ Tempo com acréscimo
-    elapsed = status.get("elapsed")
+    # ✅ Tempo com acréscimo oficial (se a API já mandar)
     extra = status.get("extra")
     if elapsed:
         if extra:
-            lines.append(f"\n⏱️ Tempo: {elapsed}+{extra}'")
+            lines.append(f"\n⏱️ Tempo Oficial: {elapsed}+{extra}'")
         else:
             lines.append(f"\n⏱️ Tempo: {elapsed}'")
 
