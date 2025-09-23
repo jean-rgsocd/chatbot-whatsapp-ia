@@ -1,56 +1,90 @@
-# Betting IA — Tipster Unificado
+Master Guide — Tipster IA (tipster.py)
+🔑 1. Pré-jogo (Sports Betting Analyzer)
 
-Este projeto integra:
-- Sports Betting Analyzer (pré-live)
-- Radar IA (ao vivo)
-- Opta IA (estatísticas de jogadores)
+Fonte: fixtures + fixtures/statistics
 
----
+Placar usado: não usa (pré-jogo não tem gols)
 
-## 🚀 Rodando localmente
+Stats: Shots on Goal, Total Shots, etc.
 
-1. Crie um ambiente virtual (opcional, mas recomendado):
-   ```bash
-   python -m venv venv
-   source venv/bin/activate   # Linux/macOS
-   venv\Scripts\activate      # Windows
-   ```
+Funções principais:
 
-2. Instale as dependências:
-   ```bash
-   pip install -r requirements.txt
-   ```
+get_fixtures_for_dates → lista jogos futuros/hoje
 
-3. Crie o arquivo `.env` com sua chave da API-Football:
-   ```
-   API_SPORTS_KEY=your_api_key_here
-   ```
+heuristics_football → monta picks com base nos remates
 
-4. Execute:
-   ```bash
-   python tipster.py
-   ```
+analyze / analyze_game → consolida análise pré-jogo
 
-O servidor vai rodar em `http://0.0.0.0:5000`.
+⚡ 2. Ao vivo (Opção 3 — análise rápida live)
 
----
+Fonte: stats_aovivo (RadarIA)
 
-## ☁️ Deploy no Render
+Placar: fixture.goals.home / fixture.goals.away ✅
 
-1. Confirme que o arquivo `Procfile` está na raiz do projeto com o conteúdo:
-   ```
-   web: gunicorn tipster:app
-   ```
+Fallback: fixture.score.home / fixture.score.away
 
-2. Dê deploy no Render.  
-   Ele vai instalar as dependências do `requirements.txt` e rodar o `gunicorn`.
+Tempo: status.elapsed
 
----
+Funções principais:
 
-## 📡 Endpoints disponíveis
+analyze_live_from_stats → gera picks em tempo real
 
-- `GET /fixtures?date=YYYY-MM-DD` → Jogos do dia  
-- `GET /fixtures/live` → Jogos ao vivo  
-- `POST /analyze/game` → Análise pré-live  
-- `POST /analyze/live` → Análise ao vivo  
-- `GET /players?id=PLAYER_ID&season=YYYY` → Estatísticas de jogador  
+format_live_analysis → texto bonito pro usuário (WhatsApp/bot)
+
+📡 3. Radar IA (Opção 4 — estatísticas ao vivo detalhadas)
+
+Fonte:
+
+fixtures → dados do jogo
+
+fixtures/statistics → estatísticas normalizadas
+
+fixtures/events → eventos (gols, cartões, escanteios, etc.)
+
+Placar: também fixture.goals ✅
+
+Função: stats_aovivo → retorna stats+eventos processados
+
+Eventos recentes: processados com _format_display_time e classify_event
+
+👤 4. Opta IA (Opção 5 — análise de jogadores)
+
+Fonte: players (API-FOOTBALL)
+
+Placar: não usa
+
+Stats do jogador: goals, shots, assists, passes, etc.
+
+Funções principais:
+
+get_players_for_team → lista jogadores
+
+analyze_player → coleta dados brutos
+
+process_and_analyze_stats → gera recomendações por mercado
+
+format_player_analysis → saída legível
+
+⚙️ 5. Helpers globais
+
+Cache: _cache_get / _cache_set
+
+HTTP: api_get_raw / safe_get
+
+Converters: safe_int, safe_float, format_conf_pct
+
+🚀 Resumo do que importa
+
+Placar ao vivo: sempre via fixture.goals (garantido ✅)
+
+Tempo de jogo: status.elapsed
+
+Fallbacks:
+
+Se gols zerados → tenta fixture.score
+
+Se stats faltando → get_stat com várias chaves alternativas
+
+Consistência:
+
+Todos os modos (Pré, Ao vivo, Radar, Opta) já usam as mesmas bases, só que adaptadas ao contexto.
