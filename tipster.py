@@ -5,7 +5,7 @@ import time
 import traceback
 import requests
 from datetime import datetime, date, timedelta
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from typing import Dict, Any, List, Optional, Tuple
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -523,9 +523,21 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
 # =========================
 app = Flask(__name__)
 
+def format_menu_text():
+    return (
+        "📊 *Betting IA*\n\n"
+        "1️⃣ Ver jogos disponíveis (Pré)\n"
+        "2️⃣ Analisar Jogos Pré\n"
+        "3️⃣ Analisar Jogos ao Vivo\n"
+        "4️⃣ Radar Futebol (Estatísticas ao vivo)\n"
+        "5️⃣ Estatísticas de jogador (Opta)\n\n"
+        "Digite o número correspondente ao jogo que deseja a análise.\n"
+        "Digite 0️⃣ para voltar ao menu principal a qualquer momento."
+    )
+
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "ok", "message": "Betting IA Tipster ativo 🚀"})
+    return jsonify({"status": "ok", "message": "Betting IA Tipster ativo 🚀", "menu": format_menu_text()})
 
 # fixtures (API-FOOTBALL style) — original
 @app.route("/fixtures", methods=["GET"])
@@ -549,7 +561,7 @@ def fixtures_live_raw():
     return jsonify(raw), 200
 
 # -----------------
-# Compat endpoints tailored for index.js / bot
+# Helpers para agrupar por País -> Liga -> Jogos
 # -----------------
 def _make_game_obj_from_fixture(f: dict) -> dict:
     fd = f.get("fixture", {}) or {}
@@ -557,9 +569,12 @@ def _make_game_obj_from_fixture(f: dict) -> dict:
     league = f.get("league", {}) or {}
     teams = f.get("teams", {}) or {}
     label = f"{teams.get('home',{}).get('name')} vs {teams.get('away',{}).get('name')}"
+    # We keep game_id (server-side), but when presenting to the client
+    # you can use 'label' only (hide id) — client may still need id for analysis endpoints.
     return {
         "game_id": fid,
         "label": label,
+        "utc_date": fd.get("date"),
         "league": {
             "id": league.get("id"),
             "country": league.get("country"),
@@ -568,6 +583,46 @@ def _make_game_obj_from_fixture(f: dict) -> dict:
         "raw": f
     }
 
+def group_fixtures_by_country_league(fixtures: List[dict]) -> List[Dict[str, Any]]:
+    """
+    Recebe lista de fixtures (raw from API) e retorna lista ordenada:
+    [
+        {
+            "country": "Mexico",
+            "leagues": [
+                {
+                    "league_id": 123,
+                    "league_name": "Liga MX",
+                    "games": [ {game obj}, ... ]
+                }, ...
+            ]
+        }, ...
+    ]
+    """
+    buckets: Dict[str, Dict[str, Any]] = OrderedDict()
+    for f in fixtures:
+        league = f.get("league", {}) or {}
+        country = league.get("country") or "Unknown"
+        league_name = league.get("name") or "Unknown League"
+        league_id = league.get("id")
+        if country not in buckets:
+            buckets[country] = {"country": country, "leagues": OrderedDict()}
+        leagues_map = buckets[country]["leagues"]
+        if league_id not in leagues_map:
+            leagues_map[league_id] = {"league_id": league_id, "league_name": league_name, "games": []}
+        leagues_map[league_id]["games"].append(_make_game_obj_from_fixture(f))
+    # convert OrderedDicts to lists
+    out = []
+    for country, cdata in buckets.items():
+        leagues_list = []
+        for lid, ldata in cdata["leagues"].items():
+            leagues_list.append(ldata)
+        out.append({"country": country, "leagues": leagues_list})
+    return out
+
+# -----------------
+# Compat endpoints tailored for index.js / bot
+# -----------------
 @app.route("/pre-live-games", methods=["GET"])
 def pre_live_games_compat():
     """
@@ -583,6 +638,29 @@ def pre_live_games_compat():
             out.append(_make_game_obj_from_fixture(raw))
     return jsonify(out), 200
 
+@app.route("/pre-live-games/full", methods=["GET"])
+def pre_live_games_full():
+    # mesma coisa mas devolve raw API-Football response style
+    fixtures = get_fixtures_for_dates(days_forward=0)
+    out = []
+    for f in fixtures:
+        if f.get("type") == "scheduled":
+            out.append(f.get("raw"))
+    return jsonify({"response": out}), 200
+
+@app.route("/pre-live-grouped", methods=["GET"])
+def pre_live_grouped():
+    """
+    Retorna fixtures pré-live agrupados por country -> leagues -> games
+    (útil para exibir no bot por país/league sem expor IDs diretamente).
+    """
+    fixtures = get_fixtures_for_dates(days_forward=0)
+    raws = [f.get("raw") for f in fixtures if f.get("type") == "scheduled"]
+    if not raws:
+        return jsonify([]), 200
+    grouped = group_fixtures_by_country_league(raws)
+    return jsonify(grouped), 200
+
 @app.route("/live-games", methods=["GET"])
 def live_games_compat():
     """
@@ -594,6 +672,19 @@ def live_games_compat():
         for f in raw["response"]:
             out.append(_make_game_obj_from_fixture(f))
     return jsonify(out), 200
+
+@app.route("/live-games/full", methods=["GET"])
+def live_games_full():
+    raw = api_get_raw("fixtures", params={"live": "all"})
+    return jsonify(raw or {"response": []}), 200
+
+@app.route("/live-games-grouped", methods=["GET"])
+def live_games_grouped():
+    raw = api_get_raw("fixtures", params={"live": "all"})
+    if not raw or not raw.get("response"):
+        return jsonify([]), 200
+    grouped = group_fixtures_by_country_league(raw["response"])
+    return jsonify(grouped), 200
 
 # -----------------
 # analyze endpoints (compat both styles)
