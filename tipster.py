@@ -260,9 +260,10 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     home_stats = stats.get("home", {})
     away_stats = stats.get("away", {})
     status = radar_data.get("status", {})
-    score = radar_data.get("score", {}).get('fulltime', {}) or {}
 
-    elapsed = status.get("elapsed", 0)
+    # ✅ Placar atualizado
+    fixture = radar_data.get("fixture", {}) or {}
+    score = fixture.get("goals", {}) or {}
     home_goals = score.get("home") or 0
     away_goals = score.get("away") or 0
     total_goals = home_goals + away_goals
@@ -831,20 +832,22 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
     away_team = teams.get("away", {}).get("name")
 
     # ✅ placar atualizado (sem depender só de fulltime)
-    score = radar_data.get("score", {}) or {}
-    home_score = score.get("home") or 0
-    away_score = score.get("away") or 0
+    fixture = radar_data.get("fixture", {}) or {}
+    score = fixture.get("goals", {}) or {}
+    home_goals = score.get("home") or 0
+    away_goals = score.get("away") or 0
 
     # fallback se ainda vier zerado
-    if home_score == 0 and away_score == 0:
-        fixture_score = radar_data.get("fixture", {}).get("score", {})
-        home_score = fixture_score.get("home", home_score)
-        away_score = fixture_score.get("away", away_score)
+    if home_goals == 0 and away_goals == 0:
+        fixture_score = fixture.get("score", {})
+        home_goals = fixture_score.get("home", home_goals)
+        away_goals = fixture_score.get("away", away_goals)
 
     lines = [
-        f"⚡ *Análise Ao Vivo — {home_team} {home_score} x {away_score} {away_team}*"
+        f"⚡ *Análise Ao Vivo — {home_team} {home_goals} x {away_goals} {away_team}*"
     ]
     lines.append(f"\n📡 RadarIA — Status: {status.get('long')}")
+
 
     # ✅ Estimativa de acréscimos (baseada em eventos)
     def estimate_extra_time(events: list) -> int:
