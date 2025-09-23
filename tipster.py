@@ -274,8 +274,8 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
                 return side_stats.get(k) or 0
         return 0
 
-    home_shots = get_stat(home_stats, 'total_shots', 'shots_total', 'shots')
-    away_shots = get_stat(away_stats, 'total_shots', 'shots_total', 'shots')
+    home_shots_on = get_stat(home_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
+away_shots_on = get_stat(away_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
     total_shots = (home_shots or 0) + (away_shots or 0)
 
     home_corners = get_stat(home_stats, 'corner_kicks', 'corners', 'corner_kicks_full')
@@ -814,9 +814,15 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
     status = radar_data.get("status", {})
     home_team = teams.get("home", {}).get("name")
     away_team = teams.get("away", {}).get("name")
-    score = radar_data.get("score", {}).get("fulltime", {})
-    home_score = score.get("home") or 0
-    away_score = score.get("away") or 0
+    score = radar_data.get("score", {}) or {}
+home_score = score.get("home") or 0
+away_score = score.get("away") or 0
+
+# fallback se ainda vier zerado
+if home_score == 0 and away_score == 0:
+    fixture_score = radar_data.get("fixture", {}).get("score", {})
+    home_score = fixture_score.get("home", home_score)
+    away_score = fixture_score.get("away", away_score)
 
     lines = [
         f"⚡ *Análise Ao Vivo — {home_team} {home_score} x {away_score} {away_team}*"
@@ -856,7 +862,9 @@ def format_live_analysis(radar_data: dict, live_tips: list) -> str:
             f"- Remates: {stats['home'].get('total_shots',0)} x {stats['away'].get('total_shots',0)}"
         )
         lines.append(
-            f"- Remates no Gol: {stats['home'].get('shots_on_target',0)} x {stats['away'].get('shots_on_target',0)}"
+            f"- Remates no Gol: {stats['home'].get('shots_on_target', stats['home'].get('shots_on', 0))} x "
+            f"{stats['away'].get('shots_on_target', stats['away'].get('shots_on', 0))}"
+
         )
         lines.append(
             f"- Escanteios: {stats['home'].get('corners',0)} x {stats['away'].get('corners',0)}"
