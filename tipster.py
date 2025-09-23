@@ -1155,15 +1155,20 @@ def api_analyze_radar():
         if not radar_data:
             return jsonify({"analysis_text": "❌ Não foi possível obter dados do radar."}), 200
 
-        # 🔄 Reaproveita o mesmo formatador usado no live
+        # ✅ Reaproveita o mesmo formatador usado no live
         live_tips = analyze_live_from_stats(radar_data or {})
         text = format_live_analysis(radar_data, live_tips)
 
-        return jsonify({"analysis_text": text}), 200
+        return jsonify({
+            "analysis_text": text,
+            "raw": {
+                "radar": radar_data,
+                "tips": live_tips
+            }
+        }), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # Opta endpoints
 @app.route("/players", methods=["GET"])
