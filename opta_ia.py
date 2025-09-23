@@ -1,13 +1,14 @@
 # opta_ia.py (Módulo de Análise de Jogadores)
-# Versão limpa, sem servidor e sem chaves de API fixas.
+# Versão com função para buscar jogadores por time.
 
 import requests
 import os
 from collections import defaultdict
 from typing import List, Dict, Optional
+from datetime import datetime
 
 # --- Configuração ---
-API_KEY = os.environ.get("API_SPORTS_KEY") # Pega a chave do ambiente, mais seguro.
+API_KEY = os.environ.get("API_SPORTS_KEY")
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
@@ -23,6 +24,26 @@ def safe_float(v, default: float = 0.0) -> float:
         return float(str(v).replace(",", "."))
     except (ValueError, TypeError, AttributeError):
         return default
+
+# --- Funções de busca de dados ---
+def get_players_for_team(team_id: int, season: int = datetime.now().year) -> Optional[List[Dict]]:
+    """Busca a lista de jogadores para um time específico."""
+    if not API_KEY:
+        print("ERRO: A variável de ambiente API_SPORTS_KEY não está definida.")
+        return None
+    try:
+        params = {'team': team_id, 'season': season}
+        r = requests.get(f"{BASE_URL}/players", headers=HEADERS, params=params, timeout=15)
+        r.raise_for_status()
+        data = r.json().get('response', [])
+        players = []
+        for item in data:
+            p = item.get('player', {}) or {}
+            players.append({"id": p.get("id"), "name": p.get("name")})
+        return players
+    except Exception as e:
+        print(f"ERRO ao buscar jogadores para o time {team_id}: {e}")
+        return None
 
 # --- Lógica Principal de Análise de Jogador (para uso futuro) ---
 def process_and_analyze_stats(player_data: Dict) -> Dict:
@@ -62,7 +83,7 @@ def process_and_analyze_stats(player_data: Dict) -> Dict:
         })
     return {"key_stats": key_stats, "recommendations": recommendations}
 
-def analyze_player(player_id: int, season: int) -> Optional[Dict]:
+def analyze_player(player_id: int, season: int = datetime.now().year) -> Optional[Dict]:
     if not API_KEY:
         print("ERRO: A variável de ambiente API_SPORTS_KEY não está definida.")
         return None
