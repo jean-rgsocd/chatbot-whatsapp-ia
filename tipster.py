@@ -275,7 +275,7 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
         return 0
 
     home_shots_on = get_stat(home_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
-away_shots_on = get_stat(away_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
+    away_shots_on = get_stat(away_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
     total_shots = (home_shots or 0) + (away_shots or 0)
 
     home_corners = get_stat(home_stats, 'corner_kicks', 'corners', 'corner_kicks_full')
