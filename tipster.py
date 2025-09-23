@@ -1027,9 +1027,22 @@ def format_live_analysis(radar_data: Dict, tips: List[Dict]) -> str:
     home_stats = stats.get("home", {})
     away_stats = stats.get("away", {})
 
-    lines.append("\n📊 Estatísticas principais:")
+        lines.append("\n📊 Estatísticas principais:")
     lines.append(f"Remates: {home_stats.get('total_shots', 0)} x {away_stats.get('total_shots', 0)}")
-    lines.append(f"Remates no Gol: {home_stats.get('shots_on_target', 0)} x {away_stats.get('shots_on_target', 0)}")
+
+    # cobre diferentes nomes que a API pode usar para remates no gol
+    def get_stat_display(side_stats, *keys):
+        for k in keys:
+            if k in side_stats:
+                return side_stats.get(k) or 0
+        return 0
+
+    lines.append(
+        f"Remates no Gol: "
+        f"{get_stat_display(home_stats, 'shots_on_target','shots_on','on_target','shots_on_goal')} x "
+        f"{get_stat_display(away_stats, 'shots_on_target','shots_on','on_target','shots_on_goal')}"
+    )
+
     lines.append(f"Escanteios: {home_stats.get('corner_kicks', 0)} x {away_stats.get('corner_kicks', 0)}")
     lines.append(f"Cartões Amarelos: {home_stats.get('yellow_cards', 0)} x {away_stats.get('yellow_cards', 0)}")
     lines.append(f"Cartões Vermelhos: {home_stats.get('red_cards', 0)} x {away_stats.get('red_cards', 0)}")
