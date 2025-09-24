@@ -1537,6 +1537,23 @@ def api_opta_player_post():
 # -----------------
 # Novos endpoints utilitários para o menu Opta / front-end
 # -----------------
+@app.route("/opta/countries", methods=["GET"])
+def opta_countries():
+    """
+    NOVO: Retorna uma lista de países únicos que têm jogos nos próximos dias.
+    """
+    try:
+        fixtures = get_fixtures_for_dates(days_forward=2)
+        # Usamos um set para garantir que cada país apareça apenas uma vez
+        countries = sorted(list(set(
+            f.get("raw", {}).get("league", {}).get("country")
+            for f in fixtures if f.get("raw", {}).get("league", {}).get("country")
+        )))
+        return jsonify(countries), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify([]), 200
+
 @app.route("/opta/leagues", methods=["GET"])
 def opta_leagues():
     """
@@ -1545,6 +1562,9 @@ def opta_leagues():
     """
     try:
         country_filter = request.args.get("country")
+        if not country_filter:
+            return jsonify({"error": "O parâmetro 'country' é obrigatório"}), 400
+
         fixtures = get_fixtures_for_dates(days_forward=2)
         leagues_map = {}
         
@@ -1553,12 +1573,10 @@ def opta_leagues():
             league = raw.get("league", {}) or {}
             country = league.get("country")
             
-            # Se um filtro de país foi passado e não bate, pula pra próxima
-            if country_filter and country != country_filter:
-                continue
-
-            if lid := league.get("id"):
-                leagues_map[lid] = {"id": lid, "name": league.get("name"), "country": country}
+            # Se o país do jogo for o mesmo do filtro, adiciona a liga
+            if country and country.lower() == country_filter.lower():
+                if lid := league.get("id"):
+                    leagues_map[lid] = {"id": lid, "name": league.get("name"), "country": country}
                 
         out = list(leagues_map.values())
         return jsonify(out), 200
