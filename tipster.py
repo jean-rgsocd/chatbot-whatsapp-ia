@@ -212,6 +212,14 @@ def enhance_predictions_with_odds(predictions: List[Dict], fixture_id: int) -> L
         pred.setdefault("best_book", None)
 
     odds_raw = api_get_raw("odds", params={"fixture": str(fixture_id)})
+    
+    # ###############################################
+    # ADICIONE ESTA LINHA AQUI
+    print("----------- RESPOSTA DA API DE ODDS -----------")
+    print(odds_raw)
+    print("---------------------------------------------")
+    # ###############################################
+
     if not odds_raw or not odds_raw.get("response"):
         return predictions
 
@@ -613,12 +621,18 @@ def _estimate_extra_time(events: list, half: int = 1) -> int:
         detail = (ev.get("detail") or "").lower()
         cat = ev.get("category", "").lower()
 
-        if "goal" in detail: total_seconds += 75 # Gol + comemoração
-        elif "var" in detail: total_seconds += 120 # VAR
-        elif "substitution" in cat: total_seconds += 30 # Substituição
-        elif "yellow card" in detail: total_seconds += 45 # Cartão e reclamação
-        elif "red card" in detail: total_seconds += 60 # Cartão vermelho
+        # Usando os tempos que você especificou
+        if "goal" in detail: total_seconds += 60
+        elif "var" in detail: total_seconds += 90
+        elif "substitution" in cat: total_seconds += 30
+        elif "red card" in detail: total_seconds += 90
+        elif "yellow card" in detail: total_seconds += 20
+        # A API não detalha todas as faltas, então não adicionamos aqui para não inflar o valor
     
+    # Adiciona uma base mínima de 1 minuto para compensar outras paradas
+    if total_seconds > 0:
+        total_seconds += 60
+
     return (total_seconds + 59) // 60 # Arredonda pra cima
 # =========================
 # OPTA IA (análise de jogador) - expandida
