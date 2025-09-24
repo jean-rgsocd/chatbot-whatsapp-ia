@@ -1112,19 +1112,21 @@ def format_live_analysis(radar_data: Dict, tips: List[Dict]) -> str:
     teams = radar_data.get("teams", {})
     home, away = teams.get("home", {}).get("name", "Casa"), teams.get("away", {}).get("name", "Fora")
     status = radar_data.get("status", {})
-    
-    # CORREÇÃO APLICADA AQUI
-    score = radar_data.get("goals", {}) # Usando o placar AO VIVO
+    elapsed = status.get('elapsed', 0)
+    score = radar_data.get("goals", {})
     home_goals, away_goals = score.get("home", 0), score.get("away", 0)
 
     lines = [f"📊 *Análise ao vivo — {home} vs {away}*"]
-    lines.append(f"⏱️ Minuto: {status.get('elapsed', 0)}'")
+    lines.append(f"⏱️ Minuto: {elapsed}'")
     lines.append(f"🔢 Placar: {home} {home_goals} x {away_goals} {away}")
     
-    # Mostra a estimativa de acréscimo se existir
+    # LÓGICA CORRIGIDA: Só mostra a estimativa se for relevante para o tempo atual
     if extra_est := radar_data.get("extra_time_est"):
-        lines.append(f"⏱️ Estimativa Acréscimo {extra_est['half']}ºT: ~{extra_est['minutes']} min")
-        
+        if extra_est['half'] == 1 and elapsed <= 55: # Mostra a do 1ºT até os 55'
+            lines.append(f"⏱️ Estimativa Acréscimo 1ºT: ~{extra_est['minutes']} min")
+        elif extra_est['half'] == 2 and elapsed > 80: # Mostra a do 2ºT a partir dos 80'
+            lines.append(f"⏱️ Estimativa Acréscimo 2ºT: ~{extra_est['minutes']} min")
+            
     lines.append("--------------------------------------------")
     lines.append("📊 *Estatísticas do Jogo*")
 
@@ -1163,14 +1165,21 @@ def format_radar_only(radar_data: Dict) -> str:
     teams = radar_data.get("teams", {})
     home, away = teams.get("home", {}).get("name", "Casa"), teams.get("away", {}).get("name", "Fora")
     status = radar_data.get("status", {})
-
-    # CORREÇÃO APLICADA AQUI
-    score = radar_data.get("goals", {}) # Usando o placar AO VIVO
+    elapsed = status.get('elapsed', 0)
+    score = radar_data.get("goals", {})
     home_goals, away_goals = score.get("home", 0), score.get("away", 0)
     
     lines = [f"📡 *Radar IA — {home} vs {away}*"]
-    lines.append(f"⏱️ Minuto: {status.get('elapsed', 0)}'")
+    lines.append(f"⏱️ Minuto: {elapsed}'")
     lines.append(f"🔢 Placar: {home} {home_goals} x {away_goals} {away}")
+    
+    # LÓGICA CORRIGIDA: Só mostra a estimativa se for relevante para o tempo atual
+    if extra_est := radar_data.get("extra_time_est"):
+        if extra_est['half'] == 1 and elapsed <= 55:
+            lines.append(f"⏱️ Estimativa Acréscimo 1ºT: ~{extra_est['minutes']} min")
+        elif extra_est['half'] == 2 and elapsed > 80:
+            lines.append(f"⏱️ Estimativa Acréscimo 2ºT: ~{extra_est['minutes']} min")
+            
     lines.append("--------------------------------------------")
     lines.append("📊 *Estatísticas do Jogo*")
     
@@ -1186,9 +1195,10 @@ def format_radar_only(radar_data: Dict) -> str:
     lines.append(f"- Escanteios: {gs(home_stats, 'corner_kicks')} x {gs(away_stats, 'corner_kicks')}")
     lines.append(f"- Cartões Amarelos: {gs(home_stats, 'yellow_cards')} x {gs(away_stats, 'yellow_cards')}")
     lines.append(f"- Posse de Bola: {gs(home_stats, 'ball_possession', 'possession')}% x {gs(away_stats, 'ball_possession', 'possession')}%")
+    # NOVAS LINHAS ADICIONADAS
+    lines.append(f"- Faltas: {gs(home_stats, 'fouls')} x {gs(away_stats, 'fouls')}")
+    lines.append(f"- Impedimentos: {gs(home_stats, 'offsides')} x {gs(away_stats, 'offsides')}")
 
-    # Aqui você pode adicionar a lógica de estimativa de acréscimos se quiser que apareça aqui
-    
     lines.append("\n_Radar fornece apenas estatísticas, sem dicas de aposta._")
     return "\n".join(lines)
 # ####################################################################
@@ -1452,6 +1462,20 @@ def api_analyze_radar():
         return jsonify({"error": str(e)}), 500
 
 # Opta endpoints
+@app.route("/opta/countries", methods=["GET"])
+def opta_countries():
+    """
+    NOVO: Retorna uma lista de países únicos que têm jogos nos próximos dias.
+    """
+    try:
+        fixtures = get_fixtures_for_dates(days_forward=2)
+        countries = sorted(list(set(f.get("raw", {}).get("league", {}).get("country") for f in fixtures if f.get("raw", {}).get("league", {}).get("country"))))
+        return jsonify(countries), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify([]), 200
+
+
 @app.route("/players", methods=["GET"])
 def api_players_old():
     try:
@@ -1494,19 +1518,26 @@ def api_opta_player_post():
 @app.route("/opta/leagues", methods=["GET"])
 def opta_leagues():
     """
-    Retorna lista simples de ligas extraídas dos fixtures (para popular dropdown).
+    Retorna ligas. Se um país for fornecido (ex: /opta/leagues?country=Brazil),
+    filtra as ligas para apenas aquele país.
     """
     try:
-        # pegar fixtures próximos 2 dias (hoje, amanhã)
+        country_filter = request.args.get("country")
         fixtures = get_fixtures_for_dates(days_forward=2)
         leagues_map = {}
+        
         for f in fixtures:
             raw = f.get("raw") or {}
             league = raw.get("league", {}) or {}
-            lid = league.get("id")
-            if not lid:
+            country = league.get("country")
+            
+            # Se um filtro de país foi passado e não bate, pula pra próxima
+            if country_filter and country != country_filter:
                 continue
-            leagues_map[lid] = {"id": lid, "name": league.get("name"), "country": league.get("country")}
+
+            if lid := league.get("id"):
+                leagues_map[lid] = {"id": lid, "name": league.get("name"), "country": country}
+                
         out = list(leagues_map.values())
         return jsonify(out), 200
     except Exception as e:
