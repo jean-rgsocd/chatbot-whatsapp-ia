@@ -1562,8 +1562,8 @@ def opta_leagues():
     """
     try:
         country_filter = request.args.get("country")
-        if not country_filter:
-            return jsonify({"error": "O parâmetro 'country' é obrigatório"}), 400
+        # Removido o erro que exigia o país, agora ele é opcional.
+        # Se não vier, lista todas as ligas.
 
         fixtures = get_fixtures_for_dates(days_forward=2)
         leagues_map = {}
@@ -1573,10 +1573,12 @@ def opta_leagues():
             league = raw.get("league", {}) or {}
             country = league.get("country")
             
-            # Se o país do jogo for o mesmo do filtro, adiciona a liga
-            if country and country.lower() == country_filter.lower():
-                if lid := league.get("id"):
-                    leagues_map[lid] = {"id": lid, "name": league.get("name"), "country": country}
+            # Se um filtro de país foi passado e não bate, pula pra próxima
+            if country_filter and country and country.lower() != country_filter.lower():
+                continue
+
+            if lid := league.get("id"):
+                leagues_map[lid] = {"id": lid, "name": league.get("name"), "country": country}
                 
         out = list(leagues_map.values())
         return jsonify(out), 200
