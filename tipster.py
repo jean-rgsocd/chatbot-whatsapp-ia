@@ -1484,20 +1484,6 @@ def api_analyze_radar():
         return jsonify({"error": str(e)}), 500
 
 # Opta endpoints
-@app.route("/opta/countries", methods=["GET"])
-def opta_countries():
-    """
-    NOVO: Retorna uma lista de países únicos que têm jogos nos próximos dias.
-    """
-    try:
-        fixtures = get_fixtures_for_dates(days_forward=2)
-        countries = sorted(list(set(f.get("raw", {}).get("league", {}).get("country") for f in fixtures if f.get("raw", {}).get("league", {}).get("country"))))
-        return jsonify(countries), 200
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify([]), 200
-
-
 @app.route("/players", methods=["GET"])
 def api_players_old():
     try:
