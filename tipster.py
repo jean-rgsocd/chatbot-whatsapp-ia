@@ -307,38 +307,60 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     status = radar_data.get("status", {})
     elapsed = status.get("elapsed", 0)
     
-    # CORREÇÃO APLICADA AQUI
-    score = radar_data.get("goals", {}) # Usando o placar AO VIVO
+    score = radar_data.get("goals", {})
     home_goals, away_goals = score.get("home", 0), score.get("away", 0)
     total_goals = home_goals + away_goals
 
     def get_stat(side_stats, *keys):
-        # ... (o resto da função continua exatamente como na versão anterior que te passei) ...
         for k in keys:
-            if k in side_stats:
-                return side_stats.get(k) or 0
+            if k in side_stats: return side_stats.get(k, 0)
         return 0
 
-    # ✅ separa remates totais e remates no gol
-    home_shots_total = get_stat(home_stats, 'total_shots', 'shots_total', 'shots')
-    away_shots_total = get_stat(away_stats, 'total_shots', 'shots_total', 'shots')
-    total_shots = (home_shots_total or 0) + (away_shots_total or 0)
+    home_shots_total = get_stat(home_stats, 'total_shots', 'shots_total')
+    away_shots_total = get_stat(away_stats, 'total_shots', 'shots_total')
+    total_shots = home_shots_total + away_shots_total
+    home_shots_on = get_stat(home_stats, 'shots_on_goal', 'shots_on_target')
+    away_shots_on = get_stat(away_stats, 'shots_on_goal', 'shots_on_target')
+    home_corners = get_stat(home_stats, 'corner_kicks', 'corners')
+    away_corners = get_stat(away_stats, 'corner_kicks', 'corners')
+    total_corners = home_corners + away_corners
 
-    home_shots_on = get_stat(home_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
-    away_shots_on = get_stat(away_stats, 'shots_on_target', 'shots_on', 'on_target', 'shots_on_goal')
+    def add_tip(market, rec, reason, conf):
+        if not any(t['market'] == market and t['recommendation'] == rec for t in tips):
+            tips.append({"market": market, "recommendation": rec, "reason": reason, "confidence": conf})
 
-    home_corners = get_stat(home_stats, 'corner_kicks', 'corners', 'corner_kicks_full')
-    away_corners = get_stat(away_stats, 'corner_kicks', 'corners', 'corner_kicks_full')
-    total_corners = (home_corners or 0) + (away_corners or 0)
+    # Lógica de Gols
+    if 15 < elapsed < 80 and total_shots > 8:
+        add_tip("Total de Gols", f"Mais de {total_goals + 0.5}", f"{total_shots} remates, jogo aberto", 0.75)
+    
+    if elapsed > 65 and total_shots < 12 :
+        add_tip("Total de Gols", f"Menos de {total_goals + 1.5}", "Jogo com pouca criação", 0.70)
+    
+    # Lógica de Escanteios
+    if 25 < elapsed < 85:
+        if total_corners > (elapsed / 7): # Média alta de cantos
+            add_tip("Escanteios Asiáticos", f"Mais de {total_corners + 1.5}", f"Média alta de cantos ({total_corners})", 0.68)
+        
+    # Lógica de Resultado e Pressão
+    pressure_diff = (home_shots_on * 1.5 + home_corners) - (away_shots_on * 1.5 + away_corners)
+    if elapsed > 50 and home_goals == away_goals:
+        if pressure_diff > 3.5:
+            add_tip("Próximo Gol", "Casa", f"Casa pressionando mais ({pressure_diff:.1f})", 0.72)
+        elif pressure_diff < -3.5:
+            add_tip("Próximo Gol", "Visitante", f"Visitante pressionando mais ({pressure_diff:.1f})", 0.72)
 
-    def add_tip(market, recommendation, reason, confidence):
-        tips.append({
-            "market": market,
-            "recommendation": recommendation,
-            "reason": reason,
-            "confidence": confidence
-        })
+    # Dica de fallback para garantir pelo menos 2-3 dicas
+    if len(tips) < 2 and elapsed > 20:
+        if home_shots_on > 1 and away_shots_on > 1:
+            add_tip("Ambas Marcam", "Sim", "Ambos times finalizam", 0.60)
+        else:
+            add_tip("Dupla Chance", "Casa ou Fora", "Jogo indefinido", 0.55)
 
+    if not tips:
+        add_tip("Análise", "Aguardando Oportunidade", "Nenhum mercado com valor claro no momento", 0.30)
+    
+    tips.sort(key=lambda x: x['confidence'], reverse=True)
+    return tips[:3]
         # =========================
     # 🔮 Estimativa de acréscimos baseada em eventos
     # =========================
