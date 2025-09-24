@@ -972,7 +972,6 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     
     tips.sort(key=lambda x: x['confidence'], reverse=True)
     return tips[:3]
-
     # =========================
     # 🔮 Estimativa de acréscimos baseada em eventos
     # =========================
