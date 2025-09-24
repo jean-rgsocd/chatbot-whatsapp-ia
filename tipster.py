@@ -212,14 +212,6 @@ def enhance_predictions_with_odds(predictions: List[Dict], fixture_id: int) -> L
         pred.setdefault("best_book", None)
 
     odds_raw = api_get_raw("odds", params={"fixture": str(fixture_id)})
-    
-    # ###############################################
-    # ADICIONE ESTA LINHA AQUI
-    print("----------- RESPOSTA DA API DE ODDS -----------")
-    print(odds_raw)
-    print("---------------------------------------------")
-    # ###############################################
-
     if not odds_raw or not odds_raw.get("response"):
         return predictions
 
@@ -239,6 +231,43 @@ def enhance_predictions_with_odds(predictions: List[Dict], fixture_id: int) -> L
         print(f"Erro ao processar odds para fixture {fixture_id}: {e}")
         return predictions
 
+    # MAPA DE TRADUÇÃO CORRIGIDO
+    market_translations = {
+        "Resultado Final": "Match Winner",
+        "Dupla Chance": "Double Chance",
+        "Ambas Marcam": "Both Teams Score",
+        "Total de Gols": "Goals Over/Under",
+        "Escanteios Asiáticos": "Asian Corners",
+        "Handicap Asiático": "Asian Handicap"
+    }
+
+    for pred in predictions:
+        internal_market = pred['market']
+        recommendation = pred['recommendation']
+        
+        # Traduz nosso nome de mercado para o nome da API
+        api_market_name = market_translations.get(internal_market)
+        if not api_market_name:
+            continue # Pula se não tivermos uma tradução para este mercado
+
+        # Monta a chave de busca final
+        # Ex: "Goals Over/Under" + ":" + "Over 1.5" -> "Goals Over/Under:Over 1.5"
+        # Ex: "Match Winner" + ":" + "Home" -> "Match Winner:Home"
+        api_key = f"{api_market_name}:{recommendation}"
+
+        # Lógica especial para Handicap, que tem 'Casa' ou 'Visitante' no meio
+        if internal_market == "Handicap Asiático":
+            parts = recommendation.split(" ")
+            team_rec = parts[0] # Casa ou Visitante
+            handicap_value = parts[1] # -0.5, +1.5 etc
+            api_key = f"{api_market_name}:{team_rec} {handicap_value}"
+
+        if found_odd := best_odds_map.get(api_key):
+            pred['best_odd'] = found_odd['odd']
+            pred['best_book'] = found_odd['bookmaker']
+            
+    return predictions
+    
     market_map = {
         "Resultado Final:Vitória Casa": "Match Winner:Home", "Resultado Final:Vitória Visitante": "Match Winner:Away", "Resultado Final:Empate": "Match Winner:Draw",
         "Dupla Chance:Casa ou Empate": "Double Chance:Home/Draw", "Dupla Chance:Fora ou Empate": "Double Chance:Away/Draw",
