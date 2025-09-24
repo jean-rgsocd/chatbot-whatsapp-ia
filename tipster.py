@@ -299,25 +299,21 @@ def analyze_game(game_id: int):
 # análise a partir de dados ao vivo (RadarIA)
 # =========================
 def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
-    if not radar_data:
-        return []
+    if not radar_data: return []
 
     tips = []
     stats = radar_data.get("statistics", {})
-    home_stats = stats.get("home", {})
-    away_stats = stats.get("away", {})
+    home_stats, away_stats = stats.get("home", {}), stats.get("away", {})
     status = radar_data.get("status", {})
-    elapsed = status.get("elapsed", 0)   # ✅ corrigido aqui
-
-    # ✅ Placar atualizado
-    fixture = radar_data.get("fixture", {}) or {}
-    score = fixture.get("goals", {}) or {}
-    home_goals = score.get("home") or 0
-    away_goals = score.get("away") or 0
+    elapsed = status.get("elapsed", 0)
+    
+    # CORREÇÃO APLICADA AQUI
+    score = radar_data.get("goals", {}) # Usando o placar AO VIVO
+    home_goals, away_goals = score.get("home", 0), score.get("away", 0)
     total_goals = home_goals + away_goals
 
-    # normaliza stats (cada API usa chaves diferentes)
     def get_stat(side_stats, *keys):
+        # ... (o resto da função continua exatamente como na versão anterior que te passei) ...
         for k in keys:
             if k in side_stats:
                 return side_stats.get(k) or 0
@@ -521,10 +517,8 @@ def stats_aovivo(game_id: int):
     if cached is not None:
         return cached
     try:
-        base = API_CFG["football"]["base"]
-        headers = headers_for()
-
-        fixture_resp = safe_get(f"{base}/fixtures", headers, params={"id": game_id})
+        # ... (toda a lógica de busca de fixture, stats e events continua igual) ...
+        fixture_resp = api_get_raw("fixtures", params={"id": game_id})
         if not fixture_resp or not fixture_resp.get("response"):
             print(f"ERRO: Fixture {game_id} não encontrado em radar_ia.")
             return None
@@ -532,7 +526,7 @@ def stats_aovivo(game_id: int):
 
         home_id = fixture.get("teams", {}).get("home", {}).get("id")
 
-        stats_resp = safe_get(f"{base}/fixtures/statistics", headers, params={"fixture": game_id})
+        stats_resp = api_get_raw("fixtures/statistics", params={"fixture": game_id})
         full_stats = {"home": {}, "away": {}}
         if stats_resp and stats_resp.get("response"):
             for team_stats in stats_resp["response"]:
@@ -544,16 +538,19 @@ def stats_aovivo(game_id: int):
                     tmp[k] = try_int(s.get("value"))
                 full_stats[side].update(tmp)
 
-        events_resp = safe_get(f"{base}/fixtures/events", headers, params={"fixture": game_id})
+        events_resp = api_get_raw("fixtures/events", params={"fixture": game_id})
         events = events_resp.get("response", []) if events_resp else []
         processed = []
         for ev in events:
+            t = ev.get("time", {})
+            elapsed, extra = t.get("elapsed"), t.get("extra")
+            _sort_key = (elapsed or 0) + (extra or 0)
             processed.append({
-                "display_time": _format_display_time(ev),
+                "display_time": f"{elapsed}+{extra}'" if extra else f"{elapsed}'",
                 "category": classify_event(ev),
                 "detail": ev.get("detail"),
                 "player": ev.get("player", {}).get("name"),
-                "_sort": _compute_sort_key(ev)
+                "_sort": _sort_key
             })
         processed.sort(key=lambda x: x["_sort"], reverse=True)
 
@@ -561,16 +558,46 @@ def stats_aovivo(game_id: int):
             "fixture": fixture,
             "teams": fixture.get("teams", {}),
             "score": fixture.get("score", {}),
+            "goals": fixture.get("goals", {}),
             "status": fixture.get("fixture", {}).get("status", {}),
             "statistics": full_stats,
             "events": processed,
         }
+        
+        # Bloco de acréscimos
+        elapsed = result.get("status", {}).get("elapsed", 0)
+        if 35 <= elapsed <= 55: # Intervalo maior para garantir
+             result["extra_time_est"] = {"half": 1, "minutes": _estimate_extra_time(processed, half=1)}
+        elif 80 <= elapsed <= 120:
+             result["extra_time_est"] = {"half": 2, "minutes": _estimate_extra_time(processed, half=2)}
+
         _radar_cache_set(ck, result)
         return result
     except Exception:
         traceback.print_exc()
         return None
 
+# NOVO: Função auxiliar para calcular acréscimos
+def _estimate_extra_time(events: list, half: int = 1) -> int:
+    total_seconds = 0
+    start_minute = 0 if half == 1 else 45
+    end_minute = 45 if half == 1 else 120 # Limite alto para pegar prorrogação
+
+    for ev in events:
+        minute = ev.get("_sort", 0) # Usar o _sort que já tem o tempo em minutos
+        if not (start_minute < minute <= end_minute):
+            continue
+        
+        detail = (ev.get("detail") or "").lower()
+        cat = ev.get("category", "").lower()
+
+        if "goal" in detail: total_seconds += 75 # Gol + comemoração
+        elif "var" in detail: total_seconds += 120 # VAR
+        elif "substitution" in cat: total_seconds += 30 # Substituição
+        elif "yellow card" in detail: total_seconds += 45 # Cartão e reclamação
+        elif "red card" in detail: total_seconds += 60 # Cartão vermelho
+    
+    return (total_seconds + 59) // 60 # Arredonda pra cima
 # =========================
 # OPTA IA (análise de jogador) - expandida
 # =========================
@@ -936,36 +963,36 @@ def analyze_live_from_stats(radar_data: Dict) -> List[Dict]:
     total_corners = home_corners + away_corners
 
     def add_tip(market, rec, reason, conf):
-        tips.append({"market": market, "recommendation": rec, "reason": reason, "confidence": conf})
+        # Evita adicionar a mesma recomendação duas vezes
+        if not any(t['market'] == market and t['recommendation'] == rec for t in tips):
+            tips.append({"market": market, "recommendation": rec, "reason": reason, "confidence": conf})
 
     # Lógica de Gols
-    if 25 < elapsed < 80 and total_shots > (elapsed / 7) and total_goals < 3:
+    if 15 < elapsed < 80 and total_shots > 8:
         add_tip("Total de Gols", f"Mais de {total_goals + 0.5}", f"{total_shots} remates, jogo aberto", 0.75)
-    elif elapsed > 70 and total_shots < (elapsed / 10):
+    
+    if elapsed > 65 and total_shots < 12 :
         add_tip("Total de Gols", f"Menos de {total_goals + 1.5}", "Jogo com pouca criação", 0.70)
     
     # Lógica de Escanteios
-    if 30 < elapsed < 85:
-        if total_corners > (elapsed / 8) + 2:
+    if 25 < elapsed < 85:
+        if total_corners > (elapsed / 7): # Média alta de cantos
             add_tip("Escanteios Asiáticos", f"Mais de {total_corners + 1.5}", f"Média alta de cantos ({total_corners})", 0.68)
-        elif total_corners < (elapsed / 15) and elapsed > 60:
-            add_tip("Escanteios Asiáticos", f"Menos de {total_corners + 2.5}", f"Média baixa de cantos ({total_corners})", 0.65)
-
-    # Lógica de Resultado e Handicap
+        
+    # Lógica de Resultado e Pressão
     pressure_diff = (home_shots_on * 1.5 + home_corners) - (away_shots_on * 1.5 + away_corners)
-    if 55 < elapsed < 88 and home_goals == away_goals:
-        if pressure_diff > 4:
+    if elapsed > 50 and home_goals == away_goals:
+        if pressure_diff > 3.5:
             add_tip("Próximo Gol", "Casa", f"Casa pressionando mais ({pressure_diff:.1f})", 0.72)
-            add_tip("Handicap Asiático", "Casa -0.5", "Casa dominante e busca o gol", 0.68)
-        elif pressure_diff < -4:
+        elif pressure_diff < -3.5:
             add_tip("Próximo Gol", "Visitante", f"Visitante pressionando mais ({pressure_diff:.1f})", 0.72)
-            add_tip("Handicap Asiático", "Visitante -0.5", "Visitante dominante e busca o gol", 0.68)
-    
-    if elapsed > 80:
-        if home_goals > away_goals:
-            add_tip("Resultado Final", "Vitória Casa", "Casa segurando o resultado", 0.80)
-        elif away_goals > home_goals:
-            add_tip("Resultado Final", "Vitória Visitante", "Visitante segurando o resultado", 0.80)
+
+    # Dica de fallback para garantir pelo menos 2-3 dicas
+    if len(tips) < 2 and elapsed > 20:
+        if home_shots_on > 1 and away_shots_on > 1:
+            add_tip("Ambas Marcam", "Sim", "Ambos times finalizam", 0.60)
+        else:
+            add_tip("Dupla Chance", "Casa ou Fora", "Jogo indefinido", 0.55)
 
     if not tips:
         add_tip("Análise", "Aguardando Oportunidade", "Nenhum mercado com valor claro no momento", 0.30)
@@ -1085,12 +1112,19 @@ def format_live_analysis(radar_data: Dict, tips: List[Dict]) -> str:
     teams = radar_data.get("teams", {})
     home, away = teams.get("home", {}).get("name", "Casa"), teams.get("away", {}).get("name", "Fora")
     status = radar_data.get("status", {})
-    score = radar_data.get("goals", {})
+    
+    # CORREÇÃO APLICADA AQUI
+    score = radar_data.get("goals", {}) # Usando o placar AO VIVO
     home_goals, away_goals = score.get("home", 0), score.get("away", 0)
 
     lines = [f"📊 *Análise ao vivo — {home} vs {away}*"]
     lines.append(f"⏱️ Minuto: {status.get('elapsed', 0)}'")
     lines.append(f"🔢 Placar: {home} {home_goals} x {away_goals} {away}")
+    
+    # Mostra a estimativa de acréscimo se existir
+    if extra_est := radar_data.get("extra_time_est"):
+        lines.append(f"⏱️ Estimativa Acréscimo {extra_est['half']}ºT: ~{extra_est['minutes']} min")
+        
     lines.append("--------------------------------------------")
     lines.append("📊 *Estatísticas do Jogo*")
 
@@ -1104,6 +1138,8 @@ def format_live_analysis(radar_data: Dict, tips: List[Dict]) -> str:
     lines.append(f"- Remates: {gs(home_stats, 'total_shots')} x {gs(away_stats, 'total_shots')}")
     lines.append(f"- Remates no Gol: {gs(home_stats, 'shots_on_goal')} x {gs(away_stats, 'shots_on_goal')}")
     lines.append(f"- Escanteios: {gs(home_stats, 'corner_kicks')} x {gs(away_stats, 'corner_kicks')}")
+    lines.append(f"- Cartões Amarelos: {gs(home_stats, 'yellow_cards')} x {gs(away_stats, 'yellow_cards')}")
+    lines.append(f"- Posse de Bola: {gs(home_stats, 'ball_possession')}% x {gs(away_stats, 'ball_possession')}%")
 
     lines.append("--------------------------------------------")
     lines.append("🎯 *Dicas de Aposta (Top 3)*")
@@ -1118,7 +1154,6 @@ def format_live_analysis(radar_data: Dict, tips: List[Dict]) -> str:
             lines.append(line)
             
     return "\n".join(lines)
-
 # ####################################################################
 # NOVO: Função exclusiva para o Radar (sem dicas) - ALTERAÇÃO 7
 # ####################################################################
@@ -1128,7 +1163,9 @@ def format_radar_only(radar_data: Dict) -> str:
     teams = radar_data.get("teams", {})
     home, away = teams.get("home", {}).get("name", "Casa"), teams.get("away", {}).get("name", "Fora")
     status = radar_data.get("status", {})
-    score = radar_data.get("goals", {})
+
+    # CORREÇÃO APLICADA AQUI
+    score = radar_data.get("goals", {}) # Usando o placar AO VIVO
     home_goals, away_goals = score.get("home", 0), score.get("away", 0)
     
     lines = [f"📡 *Radar IA — {home} vs {away}*"]
